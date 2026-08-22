@@ -7,6 +7,7 @@ verification) live in their own packages under `app/` and are not mounted yet.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -15,6 +16,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.db import close_mongo_connection, connect_to_mongo, ping
+from app.diagnosis import check_reachable as check_gemini_reachable
 from app.diagnosis import ensure_indexes as ensure_diagnosis_indexes
 from app.ingestion import ensure_indexes as ensure_event_indexes
 from app.routes import diagnoses, events
@@ -68,8 +70,18 @@ app.include_router(diagnoses.router)
 
 @app.get("/", tags=["health"])
 async def health() -> dict[str, str]:
-    """Report that the service is up, and whether MongoDB is reachable."""
-    database_connected = await ping()
+    """Report that the service is up, and whether its dependencies are usable.
+
+    The database and Gemini are checked concurrently so the endpoint costs one
+    round trip rather than two, and neither dependency being down makes this
+    endpoint fail — a degraded service still reports, it just reports honestly.
+    """
+    database_connected, (gemini_reachable, gemini_detail) = await asyncio.gather(
+        ping(), check_gemini_reachable()
+    )
+
+    if not gemini_reachable:
+        logger.warning("Gemini reported unreachable by health check: %s", gemini_detail)
 
     return {
         "status": "ok",
@@ -77,4 +89,5 @@ async def health() -> dict[str, str]:
         "version": app.version,
         "environment": settings.environment,
         "database": "connected" if database_connected else "disconnected",
+        "gemini": "reachable" if gemini_reachable else "unreachable",
     }

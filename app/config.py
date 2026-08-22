@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
     gemini_timeout_seconds: float = 20.0
+    # The health probe gets its own, much shorter budget: `GET /` must stay fast
+    # even when Gemini is hanging, so it cannot inherit the diagnosis timeout.
+    gemini_health_timeout_seconds: float = 4.0
+    # How long a reachability observation is trusted before it is re-checked.
+    gemini_health_ttl_seconds: float = 60.0
 
     # Razorpay (test mode)
     razorpay_key_id: str = ""

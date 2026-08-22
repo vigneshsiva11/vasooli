@@ -16,8 +16,11 @@ The boundary this module enforces:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.config import get_settings
@@ -52,6 +55,131 @@ class GeminiUnavailable(RuntimeError):
 def is_configured() -> bool:
     """Whether an API key is present."""
     return bool(get_settings().gemini_api_key.strip())
+
+
+# --------------------------------------------------------------------------- #
+# Reachability
+#
+# `GET /` needs to answer "can this service actually reason?" without slowing
+# down or costing anything. Three candidate probes were measured against a
+# model that was live in the catalogue but returned 404 on every call:
+#
+#   models.list()      reported the dead model as available        — useless
+#   models.get()       returned full metadata for the dead model,
+#                      `supported_actions` still listing
+#                      generateContent                             — useless
+#   generate_content() correctly returned 404                      — accurate,
+#                      but the API rejects any deadline under 10s, it consumes
+#                      real generation quota, and on the free tier repeated
+#                      polling returns 429 — a health endpoint that exhausts
+#                      the quota and then reports the resulting 429 as an
+#                      outage has manufactured its own outage.
+#
+# So metadata cannot detect an uncallable model, and a live generation call
+# cannot be afforded per request. Instead the authoritative signal is the
+# outcome of the real diagnosis calls we already make: `propose_diagnosis`
+# records whether its request reached the model, and the health endpoint
+# reports that. Zero added latency, zero extra quota, and it reflects true
+# callability rather than catalogue metadata.
+#
+# The metadata probe is kept only for the cold start, before any diagnosis has
+# run. It still catches a missing or invalid key, an unknown model id, a
+# network failure, and a Google-side outage. It knowingly cannot catch the
+# catalogued-but-uncallable case; the first real diagnosis corrects that.
+# --------------------------------------------------------------------------- #
+
+_CALL = "call"
+_PROBE = "probe"
+
+
+@dataclass(frozen=True)
+class _Observation:
+    """One recorded answer to "did we reach the model?"."""
+
+    reachable: bool
+    detail: str
+    observed_at: datetime
+    source: str
+
+
+_last_observation: _Observation | None = None
+
+
+def _record(reachable: bool, detail: str, source: str) -> None:
+    """Store the newest reachability observation."""
+    global _last_observation
+    _last_observation = _Observation(
+        reachable=reachable,
+        detail=detail,
+        observed_at=datetime.now(timezone.utc),
+        source=source,
+    )
+
+
+def reset_reachability_cache() -> None:
+    """Forget any recorded observation. For tests and config changes."""
+    global _last_observation
+    _last_observation = None
+
+
+def _fresh(observation: _Observation | None) -> bool:
+    """Whether an observation is recent enough to still be trusted."""
+    if observation is None:
+        return False
+    ttl = timedelta(seconds=get_settings().gemini_health_ttl_seconds)
+    return datetime.now(timezone.utc) - observation.observed_at < ttl
+
+
+async def _probe_model_metadata() -> tuple[bool, str]:
+    """Fetch the configured model's metadata as a cheap liveness signal.
+
+    Bounded client-side so a hanging API cannot hold up the health endpoint,
+    regardless of what deadline the SDK negotiates.
+    """
+    settings = get_settings()
+
+    try:
+        from google import genai
+    except ImportError as exc:  # pragma: no cover - dependency is declared
+        return False, f"google-genai is not installed: {exc}"
+
+    async def _get() -> str:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        info = await client.aio.models.get(model=settings.gemini_model)
+        return info.name or settings.gemini_model
+
+    try:
+        name = await asyncio.wait_for(
+            _get(), timeout=settings.gemini_health_timeout_seconds
+        )
+    except asyncio.TimeoutError:
+        return False, (
+            f"metadata probe timed out after "
+            f"{settings.gemini_health_timeout_seconds:g}s"
+        )
+    except Exception as exc:  # noqa: BLE001 - any failure means "not reachable"
+        return False, f"metadata probe failed: {exc}"
+
+    return True, f"model {name} present in catalogue (not call-verified)"
+
+
+async def check_reachable() -> tuple[bool, str]:
+    """Report whether Gemini can currently be used for diagnosis.
+
+    Returns:
+        Whether the model is reachable, and a short human-readable reason.
+    """
+    if not is_configured():
+        return False, "GEMINI_API_KEY is not set"
+
+    observation = _last_observation
+    if _fresh(observation):
+        assert observation is not None
+        return observation.reachable, observation.detail
+
+    reachable, detail = await _probe_model_metadata()
+    _record(reachable, detail, _PROBE)
+    return reachable, detail
 
 
 def _response_schema(surface: str) -> dict[str, Any]:
@@ -176,7 +304,14 @@ async def propose_diagnosis(
             ),
         )
     except Exception as exc:  # noqa: BLE001 - any transport failure is "unavailable"
+        _record(False, f"last call failed: {exc}"[:300], _CALL)
         raise GeminiUnavailable(f"Gemini request failed: {exc}") from exc
+
+    # The request reached the model and came back. Everything below this line is
+    # about the *content* of the response — a malformed or non-conforming reply
+    # is a correctness problem, not a reachability one, so it must not be
+    # recorded as an outage.
+    _record(True, f"last call to {settings.gemini_model} succeeded", _CALL)
 
     raw_text = (response.text or "").strip()
     if not raw_text:
