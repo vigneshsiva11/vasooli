@@ -99,6 +99,19 @@ async def append(
     )
 
 
+async def latest_diagnosis(event_id: str) -> dict[str, Any] | None:
+    """Return an event's most recent diagnosis document, or None if it has none.
+
+    Stage 3 decides from the latest version, so it needs the whole document —
+    including its `_id`, which is what a decision pins to make itself
+    reproducible after a later re-diagnosis.
+    """
+    return await collection().find_one(
+        {"event_id": event_id},
+        sort=[("version", DESCENDING)],
+    )
+
+
 async def list_diagnoses(event_id: str | None = None) -> list[dict[str, Any]]:
     """Return stored diagnoses, newest first.
 

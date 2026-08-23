@@ -14,6 +14,7 @@ from app.diagnosis.store import (
     VERSION_INDEX,
     append,
     ensure_indexes,
+    latest_diagnosis,
     latest_version,
     list_diagnoses,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "check_reachable",
     "diagnose",
     "ensure_indexes",
+    "latest_diagnosis",
     "latest_version",
     "list_diagnoses",
     "normalise_root_cause",

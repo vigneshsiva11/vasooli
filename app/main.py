@@ -16,10 +16,11 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.db import close_mongo_connection, connect_to_mongo, ping
+from app.decision import ensure_indexes as ensure_decision_indexes
 from app.diagnosis import check_reachable as check_gemini_reachable
 from app.diagnosis import ensure_indexes as ensure_diagnosis_indexes
 from app.ingestion import ensure_indexes as ensure_event_indexes
-from app.routes import diagnoses, events
+from app.routes import decisions, diagnoses, events
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             await ensure_event_indexes()
             await ensure_diagnosis_indexes()
+            await ensure_decision_indexes()
         except Exception:  # noqa: BLE001 - reported separately from connection failure
             logger.exception(
                 "Failed to ensure MongoDB indexes; uniqueness is NOT enforced"
@@ -66,6 +68,7 @@ app = FastAPI(
 
 app.include_router(events.router)
 app.include_router(diagnoses.router)
+app.include_router(decisions.router)
 
 
 @app.get("/", tags=["health"])

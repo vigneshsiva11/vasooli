@@ -1,5 +1,16 @@
 """Pydantic domain models and MongoDB document schemas shared across stages."""
 
+from app.models.decision import (
+    ALLOWED_INTERVENTIONS,
+    CONFIDENCE_FLOOR,
+    ERV_TOLERANCE,
+    MONEY_PRECISION,
+    NO_ACTION_INTERVENTIONS,
+    Decision,
+    DecisionRecord,
+    InterventionName,
+    expected_recovery_value,
+)
 from app.models.diagnosis import (
     ALLOWED_ROOT_CAUSES,
     MAX_EVIDENCE_ITEMS,
@@ -23,15 +34,23 @@ from app.models.events import (
 )
 
 __all__ = [
+    "ALLOWED_INTERVENTIONS",
     "ALLOWED_ROOT_CAUSES",
+    "CONFIDENCE_FLOOR",
+    "ERV_TOLERANCE",
     "MAX_EVIDENCE_ITEMS",
+    "MONEY_PRECISION",
     "NON_RECOVERABLE_ROOT_CAUSES",
+    "NO_ACTION_INTERVENTIONS",
     "UNKNOWN_ROOT_CAUSE",
     "CheckoutRootCause",
+    "Decision",
+    "DecisionRecord",
     "Diagnosis",
     "DiagnosisMethod",
     "DiagnosisRecord",
     "EventCreatedResponse",
+    "InterventionName",
     "LLMDiagnosisProposal",
     "PaymentRootCause",
     "ReceivableRootCause",
@@ -39,5 +58,6 @@ __all__ = [
     "RevenueEventRecord",
     "SubscriptionRootCause",
     "Surface",
+    "expected_recovery_value",
     "is_recoverable",
 ]
