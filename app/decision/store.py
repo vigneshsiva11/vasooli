@@ -70,6 +70,19 @@ async def latest_version(event_id: str) -> int:
     return int(document["version"]) if document else 0
 
 
+async def latest_decision(event_id: str) -> dict[str, Any] | None:
+    """Return the current recommendation for an event, or None if none exists.
+
+    The counterpart to `app.diagnosis.store.latest_diagnosis`. Stage 4 authorizes
+    the *current* recommendation, so it needs the newest version specifically
+    rather than any version.
+    """
+    return await collection().find_one(
+        {"event_id": event_id},
+        sort=[("version", DESCENDING)],
+    )
+
+
 async def _assert_diagnosis_exists(decision: Decision) -> None:
     """Verify the referenced diagnosis exists and belongs to the same event.
 

@@ -29,6 +29,7 @@ from app.decision.store import (
     DanglingDiagnosisReference,
     append,
     ensure_indexes,
+    latest_decision,
     latest_version,
     list_decisions,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "decide",
     "ensure_indexes",
     "evaluate",
+    "latest_decision",
     "latest_version",
     "list_decisions",
 ]

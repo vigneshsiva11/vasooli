@@ -1,8 +1,107 @@
 """Stage 4 — Policy.
 
-A deterministic authorization gate. Every proposed action is checked against
-amount-based autonomy tiers, contact caps, cooldown periods, and opt-out status.
-No LLM output reaches execution without passing through here.
+The authorizing half of the recommend/authorize split. Stage 3 produces a
+`Decision` ("this is the best action"); this stage produces a `PolicyVerdict`
+("this action is / is not permitted"). They are separate packages, separate
+collections, and separate models, so the split is a fact about the code rather
+than a claim about it.
 
-Nothing in this package may call an LLM.
+Three things are true of everything in here:
+
+* No LLM. Policy never reasons in natural language; `app/policy/engine.py` holds
+  no model client and the rules are constants and comparisons.
+* No execution. A `PolicyVerdict` has no field that can express that anything
+  happened. Doing the authorized thing is Stage 5.
+* Nothing is short-circuited. Every check is evaluated and recorded on every
+  verdict, so a refusal shows its whole evaluation trail.
 """
+
+from app.models.policy import (
+    ALLOWED_REASONS,
+    ALLOWED_VERDICTS,
+    CHECK_FOR_REASON,
+    POLICY_CHECKS,
+    REASON_PRECEDENCE,
+    REASON_VERDICT,
+)
+from app.policy.engine import (
+    CheckOutcome,
+    PolicyContext,
+    evaluate,
+    run_checks,
+)
+from app.policy.rules import (
+    AUTO_AUTHORIZE_BELOW,
+    CONTACT_INTERVENTIONS,
+    COOLDOWN,
+    COOLDOWN_HOURS,
+    MAX_CONTACTS_PER_EVENT,
+    MINIMUM_ERV,
+    NEVER_AUTO_AT_OR_ABOVE,
+    ZERO_COST_EXEMPT_FROM_ERV_FLOOR,
+    AutonomyTier,
+    erv_floor_applies,
+    is_contact_intervention,
+    tier_for,
+)
+from app.policy.store import (
+    AUTHORIZED_INDEX,
+    COLLECTION_NAME,
+    OPT_OUT_COLLECTION_NAME,
+    OPT_OUT_INDEX,
+    VERSION_INDEX,
+    DanglingDecisionReference,
+    DecisionReferenceError,
+    StaleDecisionReference,
+    add_opt_out,
+    append,
+    ensure_indexes,
+    gather_context,
+    is_opted_out,
+    latest_version,
+    list_opt_outs,
+    list_verdicts,
+    prior_authorized_contacts,
+)
+
+__all__ = [
+    "ALLOWED_REASONS",
+    "ALLOWED_VERDICTS",
+    "AUTHORIZED_INDEX",
+    "AUTO_AUTHORIZE_BELOW",
+    "CHECK_FOR_REASON",
+    "COLLECTION_NAME",
+    "CONTACT_INTERVENTIONS",
+    "COOLDOWN",
+    "COOLDOWN_HOURS",
+    "MAX_CONTACTS_PER_EVENT",
+    "MINIMUM_ERV",
+    "NEVER_AUTO_AT_OR_ABOVE",
+    "OPT_OUT_COLLECTION_NAME",
+    "OPT_OUT_INDEX",
+    "POLICY_CHECKS",
+    "REASON_PRECEDENCE",
+    "REASON_VERDICT",
+    "VERSION_INDEX",
+    "ZERO_COST_EXEMPT_FROM_ERV_FLOOR",
+    "AutonomyTier",
+    "CheckOutcome",
+    "DanglingDecisionReference",
+    "DecisionReferenceError",
+    "PolicyContext",
+    "StaleDecisionReference",
+    "add_opt_out",
+    "append",
+    "ensure_indexes",
+    "erv_floor_applies",
+    "evaluate",
+    "gather_context",
+    "is_contact_intervention",
+    "is_opted_out",
+    "latest_version",
+    "list_opt_outs",
+    "list_verdicts",
+    "prior_authorized_contacts",
+    "run_checks",
+    "tier_for",
+]
