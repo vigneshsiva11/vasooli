@@ -5,15 +5,28 @@ gathered in one module so the whole authority envelope of the agent can be read
 at once, and so widening it is a visible one-line diff rather than a change
 buried inside branching logic.
 
+These are the values in force *now*. `current_rulebook()` snapshots them into a
+`Rulebook`, whose fingerprint every verdict records, and `app/policy/rulebook.py`
+archives the sets that have been superseded. Amending anything below therefore
+changes the fingerprint, which is what lets the audit tell an old verdict judged
+under an older rulebook apart from one that would be decided differently today.
+
 Nothing in this module performs I/O, calls an LLM, or executes anything.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Literal, get_args
+from typing import get_args
 
 from app.models import ALLOWED_INTERVENTIONS, NO_ACTION_INTERVENTIONS
+from app.models.policy import POLICY_CHECKS, REASON_PRECEDENCE, REASON_VERDICT
+from app.policy.rulebook import (
+    SUPERSEDED_RULEBOOKS,
+    AutonomyTier,
+    Rulebook,
+    fingerprint_of,
+)
 
 # ---------------------------------------------------------------------------
 # Economics: the minimum ERV worth acting on.
@@ -45,7 +58,9 @@ ZERO_COST_EXEMPT_FROM_ERV_FLOOR = True
 # Autonomy: how much money the agent may commit without a human.
 # ---------------------------------------------------------------------------
 
-AutonomyTier = Literal["auto", "approval_required", "never_auto"]
+# `AutonomyTier` is defined in `app/policy/rulebook.py`, beside the `tier_for`
+# that returns it, and re-exported here so this module still reads as the one
+# place the authority envelope is described.
 
 #: Amounts strictly below this may be acted on autonomously.
 #: Ratified at 5,000 INR, checked against the real event distribution:
@@ -72,27 +87,26 @@ TIER_CURRENCY = "INR"
 
 #: Interventions that put a message in front of a human being.
 #:
-#: `payment_method_update_link` is RATIFIED as contact-type, resolving a
-#: contradiction between the Stage 4 brief (which named only the three below and
-#: explicitly excluded it) and Stage 3's own catalogue, where
-#: `app/models/decision.py` groups it under "customer-contact interventions" and
-#: prices it at messaging spend — a link has to be delivered to somebody. The
-#: catalogue wins: sending someone a link is contacting them, so consent gates it
-#: and it consumes one of their three contacts.
+#: Both payment links are RATIFIED as contact-type, on the principle that any link
+#: sent to a customer is outreach. This resolves a contradiction between the
+#: Stage 4 brief — which named only the three below and explicitly excluded
+#: `payment_method_update_link` — and Stage 3's own catalogue, where
+#: `app/models/decision.py` groups both links under "customer-contact
+#: interventions" and prices them at messaging spend, because a link has to be
+#: delivered to somebody. The catalogue wins: sending someone a link is contacting
+#: them, so consent gates it and it consumes one of their three contacts.
 #:
-#: STILL OPEN: `recovery_payment_link` sits in the same group in
-#: `app/models/decision.py`, is likewise priced as messaging spend, and is
-#: arguably more clearly outreach — it asks for money rather than repairing a
-#: mandate. It remains outside this set pending ratification, so an opted-out
-#: customer can still be sent one and it does not count toward the cap. Adding it
-#: is a one-line change; the checks below read this set, and no rule hard-codes an
-#: intervention name.
+#: This set and the catalogue's own grouping now agree completely. Every
+#: non-zero-cost intervention whose cost is messaging spend is here; the only
+#: interventions outside it are the two free retries, which touch the payment rail
+#: rather than the person, and the three ways of doing nothing.
 CONTACT_INTERVENTIONS: frozenset[str] = frozenset(
     {
         "reminder",
         "escalating_reminder_sequence",
         "manual_escalation",
         "payment_method_update_link",
+        "recovery_payment_link",
     }
 )
 
@@ -114,30 +128,87 @@ COOLDOWN = timedelta(hours=COOLDOWN_HOURS)
 COOLDOWN_MEASURED_FROM = "verdict.evaluated_at"
 
 
+# ---------------------------------------------------------------------------
+# The rulebook in force.
+# ---------------------------------------------------------------------------
+
+
+def current_rulebook() -> Rulebook:
+    """Snapshot every ratified parameter as it stands right now.
+
+    Reads the module globals at call time rather than closing over them at import,
+    so a caller that installs a different value for a test gets a rulebook — and
+    therefore a fingerprint — that reflects it.
+
+    The four tables pulled in from `app/models` are ratified policy too: which
+    interventions mean "do nothing", which checks make up the trail, which failure
+    outranks which, and whether a given failure blocks or routes for review. They
+    are hashed alongside the numbers, because a rulebook that disagreed about any
+    of them would reach different verdicts from identical inputs.
+    """
+    return Rulebook(
+        minimum_erv=MINIMUM_ERV,
+        zero_cost_exempt_from_erv_floor=ZERO_COST_EXEMPT_FROM_ERV_FLOOR,
+        auto_authorize_below=AUTO_AUTHORIZE_BELOW,
+        never_auto_at_or_above=NEVER_AUTO_AT_OR_ABOVE,
+        tier_currency=TIER_CURRENCY,
+        contact_interventions=frozenset(CONTACT_INTERVENTIONS),
+        max_contacts_per_event=MAX_CONTACTS_PER_EVENT,
+        cooldown_hours=COOLDOWN_HOURS,
+        cooldown_measured_from=COOLDOWN_MEASURED_FROM,
+        no_action_interventions=frozenset(NO_ACTION_INTERVENTIONS),
+        policy_checks=tuple(POLICY_CHECKS),
+        reason_precedence=tuple(REASON_PRECEDENCE),
+        reason_verdict=tuple(sorted(REASON_VERDICT.items())),
+        note="in force",
+    )
+
+
+def current_fingerprint() -> str:
+    """The fingerprint of the rulebook in force right now."""
+    return fingerprint_of(current_rulebook())
+
+
+def rulebook_registry() -> dict[str, Rulebook]:
+    """Every rulebook this build can identify, keyed by fingerprint.
+
+    The current one plus the archive. A verdict whose fingerprint is absent from
+    this mapping was judged by a rulebook this build has no record of, which the
+    audit reports rather than papering over — an unidentifiable rulebook means the
+    verdict can only be re-derived against the present, and that has to be said
+    out loud rather than assumed away.
+    """
+    registry = {rulebook.fingerprint: rulebook for rulebook in SUPERSEDED_RULEBOOKS}
+    current = current_rulebook()
+    # Last, so that a rulebook which is both archived and in force (as happens
+    # while a test has an older parameter set installed) resolves to the live one.
+    registry[current.fingerprint] = current
+    return registry
+
+
+# ---------------------------------------------------------------------------
+# Convenience predicates against the rulebook in force.
+#
+# The rulebook's own methods are what the engine consults, since a verdict must be
+# re-derivable under the rules of its own time. These module-level wrappers exist
+# for callers that legitimately mean "under today's policy" — chiefly
+# `app.policy.store`, which is deciding what to count right now.
+# ---------------------------------------------------------------------------
+
+
 def is_contact_intervention(intervention: str) -> bool:
-    """Whether the intervention puts a message in front of a customer."""
-    return intervention in CONTACT_INTERVENTIONS
+    """Whether the intervention puts a message in front of a customer, today."""
+    return current_rulebook().is_contact(intervention)
 
 
 def tier_for(amount: float) -> AutonomyTier:
-    """Return the autonomy tier for an amount at risk.
-
-    Boundaries are half-open and deliberately asymmetric: `AUTO_AUTHORIZE_BELOW`
-    is exclusive and `NEVER_AUTO_AT_OR_ABOVE` inclusive, so an amount landing
-    exactly on a threshold always falls to the more cautious side.
-    """
-    if amount >= NEVER_AUTO_AT_OR_ABOVE:
-        return "never_auto"
-    if amount < AUTO_AUTHORIZE_BELOW:
-        return "auto"
-    return "approval_required"
+    """Return the autonomy tier for an amount at risk, under today's thresholds."""
+    return current_rulebook().tier_for(amount)
 
 
 def erv_floor_applies(estimated_cost: float) -> bool:
-    """Whether the minimum-ERV floor applies to an action of this cost."""
-    if ZERO_COST_EXEMPT_FROM_ERV_FLOOR and estimated_cost <= 0:
-        return False
-    return True
+    """Whether today's minimum-ERV floor applies to an action of this cost."""
+    return current_rulebook().erv_floor_applies(estimated_cost)
 
 
 def _validate_parameters() -> None:
@@ -190,6 +261,14 @@ def _validate_parameters() -> None:
             "cap and cooldown checks entirely"
         )
 
+    if problems:
+        # Raised before anything below builds a `Rulebook`, whose own structural
+        # checks would otherwise fire first and report one problem instead of all
+        # of them.
+        raise RuntimeError(
+            "Policy parameters are inconsistent:\n  - " + "\n  - ".join(problems)
+        )
+
     tiers = set(get_args(AutonomyTier))
     reachable = {
         tier_for(AUTO_AUTHORIZE_BELOW - 0.01),
@@ -200,6 +279,28 @@ def _validate_parameters() -> None:
         problems.append(
             f"the thresholds do not reach every tier; reachable={sorted(reachable)} "
             f"declared={sorted(tiers)}"
+        )
+
+    # The archive has to stay coherent with the present, or the fingerprint stops
+    # meaning anything. Both checks below catch a real mistake in amending policy.
+    archived: dict[str, str] = {}
+    for rulebook in SUPERSEDED_RULEBOOKS:
+        existing = archived.get(rulebook.fingerprint)
+        if existing is not None:
+            problems.append(
+                f"two superseded rulebooks have the same fingerprint "
+                f"{rulebook.fingerprint}: {existing!r} and {rulebook.note!r}; they "
+                "describe one parameter set, not two"
+            )
+        archived[rulebook.fingerprint] = rulebook.note
+
+    current = current_rulebook()
+    if current.fingerprint in archived:
+        problems.append(
+            f"the rulebook in force has fingerprint {current.fingerprint}, which "
+            f"the archive lists as superseded ({archived[current.fingerprint]!r}). "
+            "Either an amendment was archived but never applied to the parameters "
+            "above, or one was reverted without removing its archive entry"
         )
 
     if problems:

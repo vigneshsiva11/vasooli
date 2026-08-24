@@ -14,21 +14,40 @@ Three things are true of everything in here:
   happened. Doing the authorized thing is Stage 5.
 * Nothing is short-circuited. Every check is evaluated and recorded on every
   verdict, so a refusal shows its whole evaluation trail.
+* Every verdict records which rulebook judged it. The parameters are a versioned,
+  fingerprinted value (`app/policy/rulebook.py`) passed into the engine, not
+  constants it reads, so an old verdict can be re-derived under the policy that
+  actually produced it.
 """
 
 from app.models.policy import (
     ALLOWED_REASONS,
     ALLOWED_VERDICTS,
     CHECK_FOR_REASON,
+    FINGERPRINT_DIGEST_CHARS,
+    FINGERPRINT_PATTERN,
+    FINGERPRINT_SCHEME,
     POLICY_CHECKS,
     REASON_PRECEDENCE,
     REASON_VERDICT,
+    UNATTESTED_FINGERPRINT_SOURCES,
+    RulebookFingerprintSource,
 )
 from app.policy.engine import (
+    MODEL_ENFORCED_FIELDS,
     CheckOutcome,
     PolicyContext,
+    UnreproducibleRulebook,
+    assert_applicable,
     evaluate,
     run_checks,
+)
+from app.policy.rulebook import (
+    HASHED_FIELDS,
+    SUPERSEDED_RULEBOOKS,
+    Rulebook,
+    canonical_form,
+    fingerprint_of,
 )
 from app.policy.rules import (
     AUTO_AUTHORIZE_BELOW,
@@ -40,8 +59,11 @@ from app.policy.rules import (
     NEVER_AUTO_AT_OR_ABOVE,
     ZERO_COST_EXEMPT_FROM_ERV_FLOOR,
     AutonomyTier,
+    current_fingerprint,
+    current_rulebook,
     erv_floor_applies,
     is_contact_intervention,
+    rulebook_registry,
     tier_for,
 )
 from app.policy.store import (
@@ -74,14 +96,21 @@ __all__ = [
     "CONTACT_INTERVENTIONS",
     "COOLDOWN",
     "COOLDOWN_HOURS",
+    "FINGERPRINT_DIGEST_CHARS",
+    "FINGERPRINT_PATTERN",
+    "FINGERPRINT_SCHEME",
+    "HASHED_FIELDS",
     "MAX_CONTACTS_PER_EVENT",
     "MINIMUM_ERV",
+    "MODEL_ENFORCED_FIELDS",
     "NEVER_AUTO_AT_OR_ABOVE",
     "OPT_OUT_COLLECTION_NAME",
     "OPT_OUT_INDEX",
     "POLICY_CHECKS",
     "REASON_PRECEDENCE",
     "REASON_VERDICT",
+    "SUPERSEDED_RULEBOOKS",
+    "UNATTESTED_FINGERPRINT_SOURCES",
     "VERSION_INDEX",
     "ZERO_COST_EXEMPT_FROM_ERV_FLOOR",
     "AutonomyTier",
@@ -89,12 +118,20 @@ __all__ = [
     "DanglingDecisionReference",
     "DecisionReferenceError",
     "PolicyContext",
+    "Rulebook",
+    "RulebookFingerprintSource",
     "StaleDecisionReference",
+    "UnreproducibleRulebook",
     "add_opt_out",
     "append",
+    "assert_applicable",
+    "canonical_form",
+    "current_fingerprint",
+    "current_rulebook",
     "ensure_indexes",
     "erv_floor_applies",
     "evaluate",
+    "fingerprint_of",
     "gather_context",
     "is_contact_intervention",
     "is_opted_out",
@@ -102,6 +139,7 @@ __all__ = [
     "list_opt_outs",
     "list_verdicts",
     "prior_authorized_contacts",
+    "rulebook_registry",
     "run_checks",
     "tier_for",
 ]

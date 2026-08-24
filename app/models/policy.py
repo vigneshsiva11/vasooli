@@ -11,6 +11,9 @@ The boundary this module enforces:
 * The reported `reason` must correspond to a check that actually FAILED, and
   `authorized` requires that nothing failed. The verdict cannot disagree with
   its own evidence.
+* Every verdict records the fingerprint of the rulebook that judged it, so a
+  stored authorization can be re-derived under the parameters actually in force
+  at the time rather than against whatever policy happens to be current.
 * There is no field for execution: no payment-link id, no `executed`, no
   `amount_charged`, no recipient. With `extra="forbid"`, one cannot be added by
   a caller. This stage grants permission; performing the action is Stage 5.
@@ -130,6 +133,42 @@ CheckEntry = Annotated[
     StringConstraints(min_length=1, max_length=400, pattern=CHECK_ENTRY_PATTERN),
 ]
 
+# ---------------------------------------------------------------------------
+# Which rulebook judged the verdict.
+# ---------------------------------------------------------------------------
+
+#: Prefix declaring how a fingerprint's digest was computed. If the canonical
+#: serialization in `app/policy/rulebook.py` ever changes, this changes with it, so
+#: fingerprints minted under the old scheme stay visibly incommensurable rather
+#: than being compared as though they meant the same thing.
+FINGERPRINT_SCHEME = "rb1"
+
+#: Hex characters of SHA-256 retained. A fingerprint identifies one of a handful of
+#: ratified parameter sets, not an adversary's chosen preimage, so what is being
+#: relied on at this width is legibility in a report, not collision resistance.
+FINGERPRINT_DIGEST_CHARS = 16
+
+#: Declared here, beside the field it validates, for the same reason `format_check`
+#: is: the producer in `app/policy/rulebook.py` builds its output from these
+#: constants, so the two cannot drift apart.
+FINGERPRINT_PATTERN = rf"^{FINGERPRINT_SCHEME}_[0-9a-f]{{{FINGERPRINT_DIGEST_CHARS}}}$"
+
+#: How a verdict came to carry the fingerprint it carries.
+#:
+#: * `evaluated` — the engine stamped it while producing the verdict. The only
+#:   value the engine can produce, and the only one that is direct evidence.
+#: * `reconstructed` — added by the fingerprint migration, having found that this
+#:   verdict re-derives exactly under one archived rulebook and no other. Evidence,
+#:   but circumstantial: identified by reproduction rather than recorded at the time.
+#: * `backfilled` — added by the migration with no identification available, using
+#:   the rulebook current at migration time. Not evidence of anything; it means the
+#:   verdict predates fingerprinting and its true rulebook is unrecoverable.
+RulebookFingerprintSource = Literal["evaluated", "reconstructed", "backfilled"]
+
+#: Sources that do not attest to the rulebook actually in force when the verdict
+#: was written. An audit must weaken its claims about these.
+UNATTESTED_FINGERPRINT_SOURCES: frozenset[str] = frozenset({"backfilled"})
+
 
 def _utc_now() -> datetime:
     """Return the current time as a timezone-aware UTC datetime, to the millisecond.
@@ -234,6 +273,23 @@ class PolicyVerdict(BaseModel):
     evaluated_at: datetime = Field(
         default_factory=_utc_now,
         description="When the verdict was produced (UTC).",
+    )
+    rulebook_fingerprint: str = Field(
+        ...,
+        pattern=FINGERPRINT_PATTERN,
+        description=(
+            "Fingerprint of the ratified policy parameters in force when this "
+            "verdict was evaluated. Required, because a permission decision whose "
+            "rulebook is unknown can only ever be re-checked against the present."
+        ),
+    )
+    rulebook_fingerprint_source: RulebookFingerprintSource = Field(
+        default="evaluated",
+        description=(
+            "evaluated (stamped by the engine), reconstructed (identified after "
+            "the fact by exact re-derivation), or backfilled (the verdict predates "
+            "fingerprinting and its true rulebook is unrecoverable)."
+        ),
     )
 
     @model_validator(mode="after")

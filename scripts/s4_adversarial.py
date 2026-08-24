@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import re
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,15 +39,25 @@ from app.decision import latest_decision
 from app.models import DecisionRecord
 from app.models.policy import (
     POLICY_CHECKS,
+    UNATTESTED_FINGERPRINT_SOURCES,
     PolicyVerdict,
     format_check,
 )
 from app.policy import (
+    HASHED_FIELDS,
+    SUPERSEDED_RULEBOOKS,
     DanglingDecisionReference,
     PolicyContext,
+    Rulebook,
     StaleDecisionReference,
+    UnreproducibleRulebook,
     append as append_verdict,
+    canonical_form,
+    current_fingerprint,
+    current_rulebook,
     evaluate,
+    fingerprint_of,
+    rulebook_registry,
     rules,
 )
 
@@ -105,6 +116,9 @@ BASE = {
     "verdict": "authorized",
     "reason": "ok",
     "checks_performed": list(VALID_TRAIL),
+    # Required, and deliberately so: a verdict that cannot say which rulebook
+    # judged it can only ever be checked against the present.
+    "rulebook_fingerprint": current_fingerprint(),
 }
 
 
@@ -158,19 +172,33 @@ def test_execution_smuggling() -> None:
         not offenders,
         f"suspicious: {sorted(offenders)}",
     )
+    # The ratified data contract. Split in two because the halves earn their place
+    # for different reasons: the first seven decide and justify permission, and the
+    # last two say which rulebook did the deciding. Neither addition gives the model
+    # any vocabulary for having *done* something — they describe what judged the
+    # record, not what the record performed — which is why the surface can grow
+    # without weakening the claim that a verdict cannot express an outcome.
+    PERMISSION_FIELDS = {
+        "event_id",
+        "decision_id",
+        "decision_version",
+        "verdict",
+        "reason",
+        "checks_performed",
+        "evaluated_at",
+    }
+    PROVENANCE_FIELDS = {"rulebook_fingerprint", "rulebook_fingerprint_source"}
+
     check(
-        "the surface is exactly the six agreed fields",
-        surface
-        == {
-            "event_id",
-            "decision_id",
-            "decision_version",
-            "verdict",
-            "reason",
-            "checks_performed",
-            "evaluated_at",
-        },
-        f"got {sorted(surface)}",
+        "the surface is exactly the agreed permission and provenance fields",
+        surface == PERMISSION_FIELDS | PROVENANCE_FIELDS,
+        f"got {sorted(surface)}, expected "
+        f"{sorted(PERMISSION_FIELDS | PROVENANCE_FIELDS)}",
+    )
+    check(
+        "the only growth since the original contract is about the rulebook",
+        all(name.startswith("rulebook_") for name in surface - PERMISSION_FIELDS),
+        f"unexpected additions: {sorted(surface - PERMISSION_FIELDS - PROVENANCE_FIELDS)}",
     )
 
 
@@ -503,6 +531,221 @@ def test_parameter_guard() -> None:
     )
 
 
+async def test_rulebook_guard() -> None:
+    section("5c. The fingerprint must move whenever any ratified parameter moves")
+
+    live = current_rulebook()
+
+    #: One mutation per hashed field. The dict is checked against `HASHED_FIELDS`
+    #: below, so adding a parameter to `Rulebook` without adding it here fails this
+    #: test — which is the point. A field left out of the fingerprint would let two
+    #: rulebooks that disagree about it claim the same identity, and every verdict
+    #: judged under either would be indistinguishable afterwards.
+    MUTATIONS = {
+        "minimum_erv": 26.0,
+        "zero_cost_exempt_from_erv_floor": not live.zero_cost_exempt_from_erv_floor,
+        "auto_authorize_below": 4_000.0,
+        "never_auto_at_or_above": 30_000.0,
+        "tier_currency": "USD",
+        "contact_interventions": live.contact_interventions | {"delayed_retry"},
+        "max_contacts_per_event": live.max_contacts_per_event + 1,
+        "cooldown_hours": live.cooldown_hours * 2,
+        "cooldown_measured_from": "execution.sent_at",
+        "no_action_interventions": frozenset({"no_action"}),
+        "policy_checks": tuple(reversed(live.policy_checks)),
+        "reason_precedence": tuple(reversed(live.reason_precedence)),
+        # The single most consequential parameter in the stage: whether a refusal
+        # blocks outright or routes to a human who can override it.
+        "reason_verdict": tuple(
+            (reason, "requires_manual_review" if reason == "cooldown_active" else verdict)
+            for reason, verdict in live.reason_verdict
+        ),
+    }
+
+    check(
+        f"every one of the {len(HASHED_FIELDS)} hashed fields has a mutation here",
+        set(MUTATIONS) == set(HASHED_FIELDS),
+        f"missing {sorted(set(HASHED_FIELDS) - set(MUTATIONS))}, "
+        f"unknown {sorted(set(MUTATIONS) - set(HASHED_FIELDS))}",
+    )
+
+    for name, value in MUTATIONS.items():
+        mutated = replace(live, **{name: value})
+        check(
+            f"changing {name} changes the fingerprint",
+            mutated.fingerprint != live.fingerprint,
+            f"both hash to {live.fingerprint}",
+        )
+        check(
+            f"and {name} is named as the difference",
+            mutated.differences_from(live) == [name],
+            f"reported {mutated.differences_from(live)}",
+        )
+
+    section("5d. …and must not move for anything that is not a parameter")
+
+    check(
+        "rewording the archive note leaves the fingerprint alone",
+        replace(live, note="rewritten years later").fingerprint == live.fingerprint,
+    )
+    check(
+        "an int and a float ERV floor of the same value hash identically",
+        replace(live, minimum_erv=25).fingerprint
+        == replace(live, minimum_erv=25.0).fingerprint,
+    )
+    check(
+        "and a float and an int contact cap of the same value do too",
+        replace(live, max_contacts_per_event=3).fingerprint
+        == replace(live, max_contacts_per_event=3.0).fingerprint,
+    )
+    check(
+        "a contact set built in a different order hashes identically",
+        replace(
+            live, contact_interventions=frozenset(sorted(live.contact_interventions))
+        ).fingerprint
+        == replace(
+            live,
+            contact_interventions=frozenset(
+                sorted(live.contact_interventions, reverse=True)
+            ),
+        ).fingerprint,
+    )
+    check(
+        "a boolean parameter is hashed as a boolean, not as the integer it subclasses",
+        '"zero_cost_exempt_from_erv_floor":true' in canonical_form(live)
+        or '"zero_cost_exempt_from_erv_floor":false' in canonical_form(live),
+        canonical_form(live)[:120],
+    )
+    check(
+        "the archive holds no entry claiming to be the rulebook in force",
+        all(book.fingerprint != live.fingerprint for book in SUPERSEDED_RULEBOOKS),
+    )
+    fingerprints = [book.fingerprint for book in SUPERSEDED_RULEBOOKS]
+    check(
+        "every archived rulebook is distinct from every other",
+        len(set(fingerprints)) == len(fingerprints),
+        f"{fingerprints}",
+    )
+
+    section("5e. A verdict cannot lie about which rulebook judged it")
+
+    for label, value in [
+        ("an empty fingerprint", ""),
+        ("a bare digest with no scheme", "3ecc9dde2839f090"),
+        ("a future scheme this build cannot read", "rb2_3ecc9dde2839f090"),
+        ("a digest one character short", "rb1_3ecc9dde2839f09"),
+        ("a digest one character long", "rb1_3ecc9dde2839f0900"),
+        ("uppercase hex", "rb1_3ECC9DDE2839F090"),
+        ("hex that is not hex", "rb1_zzzzzzzzzzzzzzzz"),
+        ("a fingerprint with the separator missing", "rb13ecc9dde2839f090"),
+    ]:
+        refused(
+            f"refuses {label}",
+            lambda value=value: PolicyVerdict(
+                **{**BASE, "rulebook_fingerprint": value}
+            ),
+        )
+
+    refused(
+        "refuses a source outside the declared vocabulary",
+        lambda: PolicyVerdict(**{**BASE, "rulebook_fingerprint_source": "guessed"}),
+    )
+    check(
+        "only `backfilled` is treated as unattested",
+        UNATTESTED_FINGERPRINT_SOURCES == frozenset({"backfilled"}),
+        f"{sorted(UNATTESTED_FINGERPRINT_SOURCES)}",
+    )
+
+    section("5f. The engine stamps the rulebook it actually used")
+
+    await connect_to_mongo()
+    decision = DecisionRecord.from_document(await latest_decision("dec_S3_TINYINV"))
+    await close_mongo_connection()
+
+    context = PolicyContext(
+        customer_ref="cust_dec_s3_tinyinv",
+        customer_opted_out=False,
+        prior_authorized_contacts=0,
+        last_authorized_contact_at=None,
+        now=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+
+    for label, book in [("the rulebook in force", live)] + [
+        (f"archived {book.fingerprint}", book) for book in SUPERSEDED_RULEBOOKS
+    ]:
+        produced = evaluate(decision=decision, context=context, rulebook=book)
+        check(
+            f"evaluating under {label} stamps that rulebook and no other",
+            produced.rulebook_fingerprint == book.fingerprint,
+            f"stamped {produced.rulebook_fingerprint}, expected {book.fingerprint}",
+        )
+        check(
+            "and marks the fingerprint as evaluated rather than inferred",
+            produced.rulebook_fingerprint_source == "evaluated",
+            produced.rulebook_fingerprint_source,
+        )
+
+    # A rulebook nobody has ratified. The engine must still stamp the truth: an
+    # unrecognisable fingerprint is a problem for the audit to report, not something
+    # to paper over by stamping a fingerprint the verdict was not judged under.
+    unratified = replace(live, cooldown_hours=live.cooldown_hours * 2, note="never ratified")
+    produced = evaluate(decision=decision, context=context, rulebook=unratified)
+    check(
+        "an unratified rulebook is stamped honestly, not rounded to a known one",
+        produced.rulebook_fingerprint == unratified.fingerprint
+        and unratified.fingerprint not in rulebook_registry(),
+        f"stamped {produced.rulebook_fingerprint}",
+    )
+
+    section("5g. A rulebook this build cannot apply is refused, not half-applied")
+
+    for label, mutation in [
+        ("a different trail contract", {"policy_checks": tuple(reversed(live.policy_checks))}),
+        ("a different precedence ordering", {"reason_precedence": tuple(reversed(live.reason_precedence))}),
+        (
+            "a different block-vs-review mapping",
+            {
+                "reason_verdict": tuple(
+                    (r, "requires_manual_review" if r == "cooldown_active" else v)
+                    for r, v in live.reason_verdict
+                )
+            },
+        ),
+    ]:
+        book = replace(live, **mutation)
+        try:
+            evaluate(decision=decision, context=context, rulebook=book)
+        except UnreproducibleRulebook as exc:
+            check(f"refuses to replay under {label}", True)
+            print(f"        refused: {str(exc)[:130]}")
+        except Exception as exc:  # noqa: BLE001
+            check(
+                f"refuses to replay under {label}",
+                False,
+                f"raised {type(exc).__name__} instead: {exc}",
+            )
+        else:
+            check(
+                f"refuses to replay under {label}",
+                False,
+                "produced a verdict, so the replay was half-applied",
+            )
+
+    # The complement: a rulebook differing only in values the models do not police
+    # must be applied in full, or historical replay would be impossible.
+    applied = evaluate(decision=decision, context=context, rulebook=unratified)
+    check(
+        "but a rulebook differing only in engine parameters IS applied",
+        f"{unratified.cooldown_hours}h" in applied.checks_performed[3],
+        applied.checks_performed[3],
+    )
+    check(
+        "and the difference is confined to the fields that actually changed",
+        unratified.differences_from(live) == ["cooldown_hours"],
+        f"{unratified.differences_from(live)}",
+    )
+
+
 def test_import_boundary() -> None:
     section("6. Import boundary — no execution or LLM machinery inside app/policy/")
 
@@ -652,6 +895,7 @@ async def main() -> None:
     test_trail_tampering()
     test_context_invariants()
     test_parameter_guard()
+    await test_rulebook_guard()
     test_import_boundary()
     await test_referential_attacks()
 
