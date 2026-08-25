@@ -32,6 +32,18 @@ from app.models.events import (
     RevenueEventRecord,
     Surface,
 )
+from app.models.execution import (
+    ACTION_FOR_INTERVENTION,
+    ALLOWED_ACTION_TYPES,
+    EXECUTABLE_INTERVENTIONS,
+    ActionType,
+    AuthorizedVerdict,
+    ExecutionRecord,
+    ExecutionRecordDocument,
+    ExecutionStatus,
+    NotAuthorized,
+    require_authorized,
+)
 from app.models.policy import (
     ALLOWED_REASONS,
     ALLOWED_VERDICTS,
@@ -54,10 +66,13 @@ from app.models.policy import (
 )
 
 __all__ = [
+    "ACTION_FOR_INTERVENTION",
+    "ALLOWED_ACTION_TYPES",
     "ALLOWED_INTERVENTIONS",
     "ALLOWED_REASONS",
     "ALLOWED_ROOT_CAUSES",
     "ALLOWED_VERDICTS",
+    "EXECUTABLE_INTERVENTIONS",
     "CHECK_ENTRY_PATTERN",
     "CHECK_FAIL",
     "CHECK_FOR_REASON",
@@ -72,6 +87,8 @@ __all__ = [
     "REASON_PRECEDENCE",
     "REASON_VERDICT",
     "UNKNOWN_ROOT_CAUSE",
+    "ActionType",
+    "AuthorizedVerdict",
     "CheckoutRootCause",
     "CustomerOptOut",
     "Decision",
@@ -80,8 +97,12 @@ __all__ = [
     "DiagnosisMethod",
     "DiagnosisRecord",
     "EventCreatedResponse",
+    "ExecutionRecord",
+    "ExecutionRecordDocument",
+    "ExecutionStatus",
     "InterventionName",
     "LLMDiagnosisProposal",
+    "NotAuthorized",
     "OptOutRequest",
     "OptOutResponse",
     "PaymentRootCause",
@@ -98,4 +119,5 @@ __all__ = [
     "format_check",
     "is_recoverable",
     "primary_reason",
+    "require_authorized",
 ]

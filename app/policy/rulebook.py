@@ -30,13 +30,17 @@ by a human, which is the most consequential disagreement in the whole stage. Thi
 scope — the full causal set rather than only the five parameters the brief named — is
 ratified, so a future reader should treat a field's presence here as deliberate.
 
-Two hashed values — `tier_currency` and `cooldown_measured_from` — are declarative
-today: nothing branches on them. They are included anyway, so that Stage 5
-re-pointing the cooldown at a real send time registers as a new rulebook instead of
-silently changing what every stored cooldown check meant. Including a field that
-turns out not to matter makes the fingerprint over-sensitive, which is the safe
-direction of error: a false "different rulebook" gets investigated, a false "same
-rulebook" gets believed.
+Two hashed values were declarative when this module was written: nothing branched on
+`tier_currency` or `cooldown_measured_from`. They were included anyway, so that Stage
+5 re-pointing the cooldown at a real send time would register as a new rulebook
+instead of silently changing what every stored cooldown check meant. That has now
+happened: `cooldown_measured_from` moved from `verdict.evaluated_at` to
+`execution.executed_at`, the fingerprint changed accordingly, and both
+`app/policy/store.py` and `scripts/s4_replay.py` branch on it so an old verdict is
+still re-derived under the anchor that judged it. `tier_currency` remains
+declarative. Including a field that turns out not to matter makes the fingerprint
+over-sensitive, which is the safe direction of error: a false "different rulebook"
+gets investigated, a false "same rulebook" gets believed.
 
 A `Rulebook` is also where the parameter-dependent predicates live, so the engine
 can be handed one and consult it. That is what makes re-deriving under a historical
@@ -60,6 +64,31 @@ from typing import Literal
 from app.models.policy import FINGERPRINT_DIGEST_CHARS, FINGERPRINT_SCHEME
 
 AutonomyTier = Literal["auto", "approval_required", "never_auto"]
+
+# ---------------------------------------------------------------------------
+# What the contact cooldown is measured from.
+# ---------------------------------------------------------------------------
+#
+# Named constants rather than bare strings, because as of Stage 5 this field is no
+# longer declarative: `app/policy/store.py` and `scripts/s4_replay.py` both branch on
+# it to decide which timestamp anchors the cooldown. A typo in one of those literals
+# would silently select the other behaviour, and the fingerprint would happily record
+# the typo as a distinct rulebook.
+
+#: The original meaning: measured from when permission was granted. Stage 4 had no
+#: send timestamp to read, so this was the best available proxy.
+COOLDOWN_FROM_VERDICT = "verdict.evaluated_at"
+
+#: The current meaning: measured from `ExecutionRecord.executed_at`, the real send
+#: time. A verdict that was authorized but never executed still counts against the
+#: cap — as a reservation, anchored at `evaluated_at` — because permission to contact
+#: somebody has been issued and may yet be used. Only an execution that *failed*
+#: releases both. See `app/policy/store.py:prior_authorized_contacts`.
+COOLDOWN_FROM_EXECUTION = "execution.executed_at"
+
+COOLDOWN_ANCHORS: frozenset[str] = frozenset(
+    {COOLDOWN_FROM_VERDICT, COOLDOWN_FROM_EXECUTION}
+)
 
 
 @dataclass(frozen=True)
@@ -122,6 +151,12 @@ class Rulebook:
             problems.append(f"cooldown_hours must not be negative ({self.cooldown_hours})")
         if not self.contact_interventions:
             problems.append("contact_interventions is empty")
+        if self.cooldown_measured_from not in COOLDOWN_ANCHORS:
+            problems.append(
+                f"cooldown_measured_from {self.cooldown_measured_from!r} is not one "
+                f"of {sorted(COOLDOWN_ANCHORS)}; the field selects behaviour now, so "
+                "an unrecognised value would be read as 'the other one'"
+            )
         overlap = self.contact_interventions & self.no_action_interventions
         if overlap:
             problems.append(
@@ -278,16 +313,25 @@ _CONTACT_SET_AFTER_FIRST_AMENDMENT = _CONTACT_SET_AT_LAUNCH | {
     "payment_method_update_link"
 }
 
+#: After `recovery_payment_link` followed on the same reasoning. Still the set in
+#: force; the third archive entry differs from today's rulebook only in where the
+#: cooldown is measured from.
+_CONTACT_SET_AFTER_SECOND_AMENDMENT = _CONTACT_SET_AFTER_FIRST_AMENDMENT | {
+    "recovery_payment_link"
+}
+
 
 def _rulebook_as_ratified_at_stage_4_launch(
     *, contact_interventions: frozenset[str], note: str
 ) -> Rulebook:
     """A rulebook with the Stage 4 launch parameters and a varying contact set.
 
-    Both amendments so far changed only which interventions count as contacting
-    somebody; every other value below is as first ratified. Keeping the shared
-    literals in one place means the two archive entries differ in exactly the field
-    that actually differed.
+    Every amendment through the end of Stage 4 changed only which interventions
+    count as contacting somebody; every other value below is as first ratified,
+    including `cooldown_measured_from`, which stayed on the verdict timestamp for the
+    whole of Stage 4 because there was no send timestamp to point at. Keeping the
+    shared literals in one place means the three archive entries differ in exactly
+    the field that actually differed.
     """
     return Rulebook(
         minimum_erv=25.0,
@@ -298,7 +342,7 @@ def _rulebook_as_ratified_at_stage_4_launch(
         contact_interventions=contact_interventions,
         max_contacts_per_event=3,
         cooldown_hours=24,
-        cooldown_measured_from="verdict.evaluated_at",
+        cooldown_measured_from=COOLDOWN_FROM_VERDICT,
         no_action_interventions=frozenset(
             {"no_action", "no_action_low_confidence", "no_action_negative_erv"}
         ),
@@ -348,6 +392,16 @@ SUPERSEDED_RULEBOOKS: tuple[Rulebook, ...] = (
         note=(
             "After payment_method_update_link was ratified as contact-type, before "
             "recovery_payment_link followed on the same reasoning"
+        ),
+    ),
+    _rulebook_as_ratified_at_stage_4_launch(
+        contact_interventions=_CONTACT_SET_AFTER_SECOND_AMENDMENT,
+        note=(
+            "All of Stage 4 after both payment links were ratified as contact-type: "
+            "the contact set as it still stands, but with the cooldown measured from "
+            "the verdict's evaluated_at, because Stage 4 sent nothing and had no real "
+            "send timestamp to measure from. Superseded by Stage 5 re-pointing the "
+            "cooldown at ExecutionRecord.executed_at"
         ),
     ),
 )

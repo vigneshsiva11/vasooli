@@ -33,12 +33,22 @@ from app.decision.store import COLLECTION_NAME as DECISION_COLLECTION
 from app.models import DecisionRecord
 from app.models.policy import CustomerOptOut, PolicyVerdict
 from app.policy.engine import PolicyContext
-from app.policy.rules import is_contact_intervention
+from app.policy.rulebook import COOLDOWN_FROM_VERDICT, Rulebook
+from app.policy.rules import current_rulebook
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "policy_verdicts"
 OPT_OUT_COLLECTION_NAME = "customer_opt_outs"
+
+#: Duplicated from `app/execution/store.py`, which owns it. This module cannot import
+#: that one — execution imports policy, so the reverse is a cycle — and a cooldown
+#: that reads the wrong collection would present as "the cooldown never triggers",
+#: which is a silent widening of the authority envelope. So `app/execution/store.py`
+#: asserts at import that the two constants agree, and that module is imported by
+#: `app/main.py` on the way up. The declaration is duplicated; the value is not
+#: allowed to diverge.
+EXECUTION_COLLECTION = "executions"
 
 VERSION_INDEX = "uniq_event_id_version"
 OPT_OUT_INDEX = "uniq_customer_ref"
@@ -160,24 +170,47 @@ async def list_opt_outs() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-async def prior_authorized_contacts(event_id: str) -> tuple[int, Any]:
-    """Count authorized contact-type verdicts for an event, and time the latest.
+async def prior_authorized_contacts(
+    event_id: str, *, rulebook: Rulebook | None = None
+) -> tuple[int, Any]:
+    """Count effective contact-type authorizations for an event, and time the latest.
 
     Scope is ratified as per `event_id` across ALL decision and diagnosis
     versions: the cap protects a person from being chased repeatedly about one
     debt, and re-diagnosing the same failure does not reset how many messages they
     have already received.
 
-    Only `authorized` verdicts count. A blocked or review-pending verdict never
-    reached execution, so it did not consume a contact.
+    Only `authorized` verdicts are candidates. A blocked or review-pending verdict
+    never reached execution, so it did not consume a contact.
 
     Whether a verdict was a contact is a property of the *decision* it authorized,
     not of the verdict — so this joins rather than denormalising the intervention
-    onto `PolicyVerdict`, which holds permission facts only.
+    onto `PolicyVerdict`, which holds permission facts only. It is also a property of
+    the *rulebook*: the contact set has been amended twice, so the question is always
+    "was this a contact under these rules", never "under today's".
+
+    What counts, and from when, depends on `rulebook.cooldown_measured_from`:
+
+    * `verdict.evaluated_at` (all of Stage 4) — every authorized contact-type verdict
+      counts, anchored at when permission was granted. Executions are not consulted;
+      they did not exist.
+    * `execution.executed_at` (ratified in Stage 5) — a verdict whose execution
+      FAILED counts for nothing, because nothing reached the customer. One that
+      completed is anchored at its real send time. One not yet executed still counts
+      against the cap as a reservation, anchored at `evaluated_at`: permission to
+      contact somebody has been issued and may yet be used, so treating it as free
+      would let a caller mint three authorizations and then execute all three inside
+      the cooldown.
+
+    That last fallback is why the returned timestamp can still be an `evaluated_at`
+    under the new anchor. It is the conservative choice — earlier than the eventual
+    send time, so the cooldown expires no later than it should.
 
     Returns:
         (count, timestamp of the most recent) with timestamp None when count is 0.
     """
+    active = current_rulebook() if rulebook is None else rulebook
+
     verdicts = (
         await collection()
         .find(
@@ -198,7 +231,7 @@ async def prior_authorized_contacts(event_id: str) -> tuple[int, Any]:
     contact_decisions = {
         str(document["_id"])
         for document in decisions
-        if is_contact_intervention(document["recommended_intervention"])
+        if active.is_contact(document["recommended_intervention"])
     }
 
     contacts = [
@@ -207,20 +240,55 @@ async def prior_authorized_contacts(event_id: str) -> tuple[int, Any]:
     if not contacts:
         return 0, None
 
-    latest = max(verdict["evaluated_at"] for verdict in contacts)
-    return len(contacts), latest
+    if active.cooldown_measured_from == COOLDOWN_FROM_VERDICT:
+        return len(contacts), max(verdict["evaluated_at"] for verdict in contacts)
+
+    executions = (
+        await get_database()[EXECUTION_COLLECTION]
+        .find(
+            {"policy_verdict_id": {"$in": [str(v["_id"]) for v in contacts]}},
+            {"policy_verdict_id": 1, "status": 1, "executed_at": 1},
+        )
+        .to_list(length=None)
+    )
+    by_verdict = {document["policy_verdict_id"]: document for document in executions}
+
+    anchors: list[Any] = []
+    for verdict in contacts:
+        execution = by_verdict.get(str(verdict["_id"]))
+        if execution is None:
+            anchors.append(verdict["evaluated_at"])
+        elif execution["status"] == "completed":
+            anchors.append(execution["executed_at"])
+        # A failed execution releases both the cap slot and the cooldown anchor.
+
+    if not anchors:
+        return 0, None
+    return len(anchors), max(anchors)
 
 
 async def gather_context(
-    *, decision: DecisionRecord, customer_ref: str, now: Any = None
+    *,
+    decision: DecisionRecord,
+    customer_ref: str,
+    now: Any = None,
+    rulebook: Rulebook | None = None,
 ) -> PolicyContext:
     """Read the world facts policy needs, then hand them to the pure engine.
 
     Every query here is a read. Assembling the context is the only place Stage 4
     touches the database before a verdict exists.
+
+    `rulebook` defaults to the one in force and exists so that a caller re-deriving
+    an old verdict gathers facts the way that verdict's rulebook counted them —
+    which interventions were contacts, and whether executions are consulted at all.
+    Passing the rulebook to the engine while gathering the context under today's
+    rules would be exactly the half-applied A/B that Stage 4's replay work rejected.
     """
     opted_out = await is_opted_out(customer_ref)
-    contacts, last_contact = await prior_authorized_contacts(decision.event_id)
+    contacts, last_contact = await prior_authorized_contacts(
+        decision.event_id, rulebook=rulebook
+    )
 
     kwargs: dict[str, Any] = {
         "customer_ref": customer_ref,

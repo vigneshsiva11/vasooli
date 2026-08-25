@@ -53,11 +53,32 @@ from app.policy import (
     append as append_verdict,
     evaluate,
 )
+from app.policy.store import is_opted_out
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8123"
 
-EVENT_ID = "pol_S4_MULTI"
-CUSTOMER = "cust_pol_S4_multi"
+#: Run-tagged, and it has to be.
+#:
+#: `three_prior_chases` below builds a `PolicyContext` by hand so it can back-date
+#: `now` and lay out a timeline in seconds instead of over three days. The injected
+#: counts and anchors are chosen to agree exactly with what the database would say —
+#: each chase's `last_authorized_contact_at` is the previous verdict's stored
+#: `evaluated_at` — so on a FRESH event every verdict it writes still re-derives from
+#: the record, which is what `scripts/s4_audit.py` demands of all of them.
+#:
+#: On a REUSED event id that stops being true. A second run injects
+#: `prior_authorized_contacts=0` and `customer_opted_out=False` onto an event that
+#: already carries three authorized contacts and a withdrawn consent, and the verdicts
+#: it stores then describe a world that never existed — permanently, in an append-only
+#: log. That is how `pol_S4_MULTI` v6/v7/v8 came to be unre-derivable: not a policy
+#: bug, a fixture writing fiction over its own history. Tagging the id is the fix; a
+#: verdict log is not a scratch pad.
+TAG = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+EVENT_ID = f"pol_S4_MULTI_{TAG}"
+#: Tagged for the same reason: an opt-out is permanent and per customer, so a shared
+#: customer_ref would make the second run's first chase inject a consent that had
+#: already been withdrawn.
+CUSTOMER = f"cust_pol_S4_multi_{TAG}"
 
 #: Starting balance — inside the auto tier, so the three chases below are genuinely
 #: authorized by the engine rather than forced.
@@ -126,9 +147,37 @@ async def ingest(amount: float) -> None:
 
 
 async def three_prior_chases() -> None:
-    """Authorize three real contacts, spaced so the engine permits each one."""
+    """Authorize three real contacts, spaced so the engine permits each one.
+
+    The context is injected rather than gathered, because the point is to lay out a
+    three-day timeline in a few seconds. That is only sound on an event with no
+    history: the injected facts are chosen to match what `gather_context` would have
+    returned from an empty event, so the verdicts stay re-derivable. Checked below
+    rather than assumed — an injected context written over a real history is a stored
+    verdict describing a world that never existed, and nothing downstream can tell
+    the difference.
+    """
     await connect_to_mongo()
     print("\n3. Three prior chases, spaced past the cooldown (clock injected)")
+
+    existing = await get_database()["policy_verdicts"].count_documents(
+        {"event_id": EVENT_ID}
+    )
+    if existing:
+        problems.append(
+            f"{EVENT_ID} already carries {existing} verdict(s); refusing to inject a "
+            "context over a real history, because the verdicts that produced would "
+            "claim a world the database contradicts and could never re-derive"
+        )
+        await close_mongo_connection()
+        return
+    if await is_opted_out(CUSTOMER):
+        problems.append(
+            f"{CUSTOMER} is already on the do-not-contact list; refusing to inject "
+            "customer_opted_out=False over a withdrawn consent"
+        )
+        await close_mongo_connection()
+        return
 
     decision = DecisionRecord.from_document(await latest_decision(EVENT_ID))
     print(

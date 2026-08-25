@@ -22,6 +22,7 @@ from typing import get_args
 from app.models import ALLOWED_INTERVENTIONS, NO_ACTION_INTERVENTIONS
 from app.models.policy import POLICY_CHECKS, REASON_PRECEDENCE, REASON_VERDICT
 from app.policy.rulebook import (
+    COOLDOWN_FROM_EXECUTION,
     SUPERSEDED_RULEBOOKS,
     AutonomyTier,
     Rulebook,
@@ -120,12 +121,30 @@ MAX_CONTACTS_PER_EVENT = 3
 COOLDOWN_HOURS = 24
 COOLDOWN = timedelta(hours=COOLDOWN_HOURS)
 
-#: Cooldown is measured from the previous verdict's `evaluated_at`, which is when
-#: permission was granted, not when a message went out — Stage 4 does not send
-#: anything and has no send timestamp to read. Authorization is expected to be
-#: followed promptly by execution, so the two are close; once Stage 5 records real
-#: send times, this should measure from those instead.
-COOLDOWN_MEASURED_FROM = "verdict.evaluated_at"
+#: RATIFIED, Stage 5: the cooldown is measured from `ExecutionRecord.executed_at` —
+#: when a message actually went out — not from when permission was granted.
+#:
+#: Stage 4 measured from `verdict.evaluated_at` because it sent nothing and had no
+#: send timestamp to read. Now there is one, and the difference is not cosmetic: an
+#: authorization that is executed an hour late would, under the old anchor, let the
+#: next contact go out an hour early.
+#:
+#: This value is no longer declarative. `prior_authorized_contacts` below branches on
+#: it, and so does `scripts/s4_replay.py`, so a verdict evaluated under an archived
+#: rulebook is still re-derived against the anchor that judged it rather than against
+#: this one. That branch is the whole reason this field was hashed into the
+#: fingerprint back in Stage 4 while nothing yet read it.
+#:
+#: What counts, precisely, once a send time exists:
+#:
+#:   * authorized but not yet executed — counts against the cap as a RESERVATION,
+#:     anchored at `evaluated_at`. Permission to contact someone has been issued and
+#:     may still be used, so it cannot be free;
+#:   * executed successfully — counts against the cap, anchored at `executed_at`;
+#:   * executed and FAILED — counts against neither. Nothing reached the customer,
+#:     so nothing should be spent or timed out on their behalf. This is what makes
+#:     re-authorization a usable recovery path after a failed send.
+COOLDOWN_MEASURED_FROM = COOLDOWN_FROM_EXECUTION
 
 
 # ---------------------------------------------------------------------------

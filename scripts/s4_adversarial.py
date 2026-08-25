@@ -60,6 +60,7 @@ from app.policy import (
     rulebook_registry,
     rules,
 )
+from app.policy.rulebook import COOLDOWN_ANCHORS
 
 passed = 0
 failed: list[str] = []
@@ -536,6 +537,16 @@ async def test_rulebook_guard() -> None:
 
     live = current_rulebook()
 
+    #: The cooldown anchor is now a closed set — `Rulebook.__post_init__` rejects
+    #: anything else, because the field selects behaviour rather than merely
+    #: documenting it and an unrecognised value would be read as "the other one". So
+    #: the mutation has to be the *other* recognised anchor, derived rather than
+    #: written down, so this keeps testing the right thing if the ratified default
+    #: ever moves back.
+    other_anchor = next(
+        anchor for anchor in sorted(COOLDOWN_ANCHORS) if anchor != live.cooldown_measured_from
+    )
+
     #: One mutation per hashed field. The dict is checked against `HASHED_FIELDS`
     #: below, so adding a parameter to `Rulebook` without adding it here fails this
     #: test — which is the point. A field left out of the fingerprint would let two
@@ -550,7 +561,7 @@ async def test_rulebook_guard() -> None:
         "contact_interventions": live.contact_interventions | {"delayed_retry"},
         "max_contacts_per_event": live.max_contacts_per_event + 1,
         "cooldown_hours": live.cooldown_hours * 2,
-        "cooldown_measured_from": "execution.sent_at",
+        "cooldown_measured_from": other_anchor,
         "no_action_interventions": frozenset({"no_action"}),
         "policy_checks": tuple(reversed(live.policy_checks)),
         "reason_precedence": tuple(reversed(live.reason_precedence)),
@@ -581,6 +592,32 @@ async def test_rulebook_guard() -> None:
             mutated.differences_from(live) == [name],
             f"reported {mutated.differences_from(live)}",
         )
+
+    #: The anchor is the one hashed field whose *value* changes behaviour rather than
+    #: a threshold, so a typo in it does not read as a stricter or looser rule — it
+    #: reads as the other rule entirely. Rejected at construction rather than
+    #: defaulted, so a mistyped archive entry cannot silently reinterpret history.
+    check(
+        f"the cooldown anchor is a closed set of {len(COOLDOWN_ANCHORS)}",
+        len(COOLDOWN_ANCHORS) == 2 and live.cooldown_measured_from in COOLDOWN_ANCHORS,
+        f"anchors are {sorted(COOLDOWN_ANCHORS)}, live is "
+        f"{live.cooldown_measured_from!r}",
+    )
+    for bogus in ("execution.sent_at", "verdict.created_at", "", "executed_at"):
+        try:
+            replace(live, cooldown_measured_from=bogus)
+        except ValueError as exc:
+            check(
+                f"an unrecognised cooldown anchor {bogus!r} is refused at construction",
+                "cooldown_measured_from" in str(exc),
+                f"raised, but not about the anchor: {exc}",
+            )
+        else:
+            check(
+                f"an unrecognised cooldown anchor {bogus!r} is refused at construction",
+                False,
+                "constructed a rulebook whose anchor selects no known behaviour",
+            )
 
     section("5d. …and must not move for anything that is not a parameter")
 

@@ -1,0 +1,98 @@
+[
+  {
+    "_id": {
+      "$oid": "6a8c6f69474e2d8946197893"
+    },
+    "event_id": "pol_S4_MULTI",
+    "decision_id": "6a8c6f68f81f8f6f93d0e6c5",
+    "decision_version": 3,
+    "verdict": "authorized",
+    "reason": "ok",
+    "checks_performed": [
+      "decision_is_actionable: PASS (manual_escalation is a real intervention)",
+      "customer_opt_out: PASS (customer cust_pol_S4_multi has not opted out)",
+      "contact_cap: PASS (0 of 3 contacts used for event pol_S4_MULTI)",
+      "contact_cooldown: PASS (no prior authorized contact for event pol_S4_MULTI, so the 24h cooldown has not started)",
+      "erv_minimum: PASS (ERV 775.00 clears the 25.00 minimum at a cost of 50.00)",
+      "amount_tier: PASS (1,500.00 is below the 5,000.00 autonomous limit)"
+    ],
+    "evaluated_at": {
+      "$date": "2026-08-22T04:20:57.289Z"
+    },
+    "rulebook_fingerprint": "rb1_aba19a5e5ee8124e",
+    "rulebook_fingerprint_source": "evaluated",
+    "version": 6
+  },
+  {
+    "_id": {
+      "$oid": "6a8c6f69474e2d8946197894"
+    },
+    "event_id": "pol_S4_MULTI",
+    "decision_id": "6a8c6f68f81f8f6f93d0e6c5",
+    "decision_version": 3,
+    "verdict": "authorized",
+    "reason": "ok",
+    "checks_performed": [
+      "decision_is_actionable: PASS (manual_escalation is a real intervention)",
+      "customer_opt_out: PASS (customer cust_pol_S4_multi has not opted out)",
+      "contact_cap: PASS (1 of 3 contacts used for event pol_S4_MULTI)",
+      "contact_cooldown: PASS (last authorized contact was 30.0h ago, outside the 24h cooldown)",
+      "erv_minimum: PASS (ERV 775.00 clears the 25.00 minimum at a cost of 50.00)",
+      "amount_tier: PASS (1,500.00 is below the 5,000.00 autonomous limit)"
+    ],
+    "evaluated_at": {
+      "$date": "2026-08-23T10:20:57.289Z"
+    },
+    "rulebook_fingerprint": "rb1_aba19a5e5ee8124e",
+    "rulebook_fingerprint_source": "evaluated",
+    "version": 7
+  },
+  {
+    "_id": {
+      "$oid": "6a8c6f69474e2d8946197895"
+    },
+    "event_id": "pol_S4_MULTI",
+    "decision_id": "6a8c6f68f81f8f6f93d0e6c5",
+    "decision_version": 3,
+    "verdict": "authorized",
+    "reason": "ok",
+    "checks_performed": [
+      "decision_is_actionable: PASS (manual_escalation is a real intervention)",
+      "customer_opt_out: PASS (customer cust_pol_S4_multi has not opted out)",
+      "contact_cap: PASS (2 of 3 contacts used for event pol_S4_MULTI)",
+      "contact_cooldown: PASS (last authorized contact was 28.0h ago, outside the 24h cooldown)",
+      "erv_minimum: PASS (ERV 775.00 clears the 25.00 minimum at a cost of 50.00)",
+      "amount_tier: PASS (1,500.00 is below the 5,000.00 autonomous limit)"
+    ],
+    "evaluated_at": {
+      "$date": "2026-08-24T14:20:57.289Z"
+    },
+    "rulebook_fingerprint": "rb1_aba19a5e5ee8124e",
+    "rulebook_fingerprint_source": "evaluated",
+    "version": 8
+  },
+  {
+    "_id": {
+      "$oid": "6a8c6f6bf81f8f6f93d0e6c8"
+    },
+    "event_id": "pol_S4_MULTI",
+    "decision_id": "6a8c6f6af81f8f6f93d0e6c7",
+    "decision_version": 4,
+    "verdict": "blocked",
+    "reason": "customer_opted_out",
+    "checks_performed": [
+      "decision_is_actionable: PASS (manual_escalation is a real intervention)",
+      "customer_opt_out: FAIL (customer cust_pol_S4_multi is on the do-not-contact list and manual_escalation would contact them)",
+      "contact_cap: FAIL (6 contact(s) already authorized for event pol_S4_MULTI, cap is 3 per event across all decision versions)",
+      "contact_cooldown: FAIL (last authorized contact was 2.0h ago at 2026-08-24T14:20:57.289000+00:00, inside the 24h cooldown; 22.0h remaining)",
+      "erv_minimum: PASS (ERV 32,950.00 clears the 25.00 minimum at a cost of 50.00)",
+      "amount_tier: FAIL (60,000.00 is at or above the 25,000.00 never-auto ceiling; a human must decide this one)"
+    ],
+    "evaluated_at": {
+      "$date": "2026-08-24T16:20:59.230Z"
+    },
+    "rulebook_fingerprint": "rb1_aba19a5e5ee8124e",
+    "rulebook_fingerprint_source": "evaluated",
+    "version": 9
+  }
+]

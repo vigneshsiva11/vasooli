@@ -126,6 +126,7 @@ async def rederive_every_verdict(
     decisions: dict[str, dict[str, Any]],
     opt_outs: dict[str, Any],
     events: dict[str, dict[str, Any]],
+    executions: dict[str, dict[str, Any]],
 ) -> None:
     section("1. Re-derive every stored verdict under the rulebook it names")
 
@@ -191,6 +192,7 @@ async def rederive_every_verdict(
                 opt_outs=opt_outs,
                 customer_ref=event["customer_ref"],
                 event_verdicts=event_verdicts,
+                executions=executions,
                 rulebook=rulebook,
             )
             if not result.applied:
@@ -231,6 +233,7 @@ async def rederive_every_verdict(
                         opt_outs=opt_outs,
                         customer_ref=event["customer_ref"],
                         event_verdicts=event_verdicts,
+                        executions=executions,
                         rulebook=candidate,
                     ).exact
                 ]
@@ -648,14 +651,16 @@ async def main() -> None:
 
     verify_audit_tolerances()
 
-    verdicts, decisions, opt_outs, events = await load_everything(get_database())
+    verdicts, decisions, opt_outs, events, executions = await load_everything(
+        get_database()
+    )
     print(
         f"\n{len(verdicts)} verdicts, {len(decisions)} decisions, "
-        f"{len(opt_outs)} opted-out customer(s), "
+        f"{len(opt_outs)} opted-out customer(s), {len(executions)} execution(s), "
         f"{len(rulebook_registry())} known rulebook(s)"
     )
 
-    await rederive_every_verdict(verdicts, decisions, opt_outs, events)
+    await rederive_every_verdict(verdicts, decisions, opt_outs, events, executions)
     check_fingerprint_coverage(verdicts)
     check_reason_verdict_pairs(verdicts)
     check_trail_completeness(verdicts)

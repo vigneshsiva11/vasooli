@@ -36,9 +36,22 @@ plus the archive in `app/policy/rulebook.py` — and the outcome decides the lab
 Taking the newest *consistent* rulebook rather than always taking today's is what
 keeps the field from contradicting its own record. Some verdicts re-derive exactly
 under both archived rulebooks and not at all under the current one; stamping today's
-fingerprint on those would store a value their own stored trail refutes. It also
-leaves a useful signal behind: a backfilled verdict naming a superseded rulebook is
-one that today's policy demonstrably could not have produced.
+fingerprint on those would store a value their own stored trail refutes.
+
+What a backfilled fingerprint therefore records is the newest rulebook that fit the
+verdict among those this build knew *when the label was written* — the narrowest
+consistent account available at that moment. It is not a claim that no other
+rulebook fits, and specifically not a claim that today's policy could not have
+produced the verdict. Both readings would be stronger than the evidence: the
+registry grows, and a rulebook added later can fit a verdict just as exactly as the
+one recorded, without anything about that verdict changing. Read a superseded
+fingerprint as "this fit, and was the tightest fit then", not as "only this fits".
+
+`scripts/s4_fingerprint_reconcile.py` re-checks these labels against the registry as
+it currently stands, and reports where a stored value is no longer the newest fit.
+It deliberately does not rewrite them: the stored value still reproduces the verdict
+exactly, so the record stays sound and the drift is a matter of prose precision
+rather than of re-derivability. See `docs/data-corrections.md`.
 
 `backfilled` means exactly what the brief says it means: the verdict predates
 fingerprinting and its true rulebook is unrecoverable. Choosing the newest of several
@@ -137,16 +150,23 @@ def decide_fingerprint(
 
     if len(exact) > 1:
         # Several rulebooks reproduce it, so the record does not pick one. Take the
-        # newest that does. Two properties matter, neither of them a claim about
-        # history — the label stays `backfilled` precisely because this is a choice
-        # and not a deduction:
+        # newest that does — the tightest consistent account available right now. The
+        # label stays `backfilled` precisely because this is a choice and not a
+        # deduction.
         #
-        #   * the stored fingerprint is never one the record contradicts. Stamping
-        #     today's on a verdict that demonstrably does not re-derive under
-        #     today's rules would put a value in the field that its own trail
-        #     refutes;
-        #   * it follows that a backfilled verdict naming a *superseded* rulebook is
-        #     itself informative: it means today's policy cannot have produced it.
+        # The one property that matters: the stored fingerprint is never one the
+        # record contradicts. Stamping today's on a verdict that demonstrably does
+        # not re-derive under today's rules would put a value in the field that its
+        # own trail refutes.
+        #
+        # What does NOT follow — and an earlier version of this comment claimed it
+        # did — is that a backfilled verdict naming a superseded rulebook is one
+        # today's policy could not have produced. "Newest that fits" is evaluated
+        # against the registry as it stands when this runs, and the registry grows.
+        # A rulebook added afterwards can fit the same verdict just as exactly, which
+        # makes the stored value stale as a *tiebreak* while remaining perfectly valid
+        # as a fit. `scripts/s4_fingerprint_reconcile.py` reports that drift and
+        # leaves it alone.
         chosen = exact[-1]
         others = len(exact) - 1
         return (
@@ -180,7 +200,7 @@ def decide_fingerprint(
 
 async def build_plans() -> list[Plan]:
     database = get_database()
-    verdicts, decisions, opt_outs, events = await load_everything(database)
+    verdicts, decisions, opt_outs, events, executions = await load_everything(database)
 
     registry = rulebook_registry()
     current = current_fingerprint()
@@ -253,6 +273,7 @@ async def build_plans() -> list[Plan]:
                     opt_outs=opt_outs,
                     customer_ref=event["customer_ref"],
                     event_verdicts=event_verdicts,
+                    executions=executions,
                     rulebook=rulebook,
                 )
                 for rulebook in candidates
@@ -347,8 +368,8 @@ def summarise(plans: list[Plan]) -> None:
     excludes_today = [plan for plan in ambiguous if plan.fingerprint != current]
     if excludes_today:
         print(
-            f"    of those, {len(excludes_today)} name a SUPERSEDED rulebook, meaning "
-            "today's policy cannot have produced them:"
+            f"    of those, {len(excludes_today)} name a SUPERSEDED rulebook — today's "
+            "rules do not\n    reproduce them, so the tightest fit is an archived one:"
         )
         for plan in excludes_today:
             print(f"      - {plan.label}: {plan.fingerprint}")
