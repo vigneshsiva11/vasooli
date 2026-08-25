@@ -22,7 +22,17 @@ from app.diagnosis import ensure_indexes as ensure_diagnosis_indexes
 from app.execution import ensure_indexes as ensure_execution_indexes
 from app.ingestion import ensure_indexes as ensure_event_indexes
 from app.policy import ensure_indexes as ensure_policy_indexes
-from app.routes import decisions, diagnoses, events, executions, policy
+from app.ptp import ensure_indexes as ensure_promise_indexes
+from app.routes import (
+    decisions,
+    diagnoses,
+    events,
+    executions,
+    policy,
+    promises,
+    webhooks,
+)
+from app.webhooks import ensure_indexes as ensure_verification_indexes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +59,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await ensure_decision_indexes()
             await ensure_policy_indexes()
             await ensure_execution_indexes()
+            await ensure_verification_indexes()
+            await ensure_promise_indexes()
         except Exception:  # noqa: BLE001 - reported separately from connection failure
             logger.exception(
                 "Failed to ensure MongoDB indexes; uniqueness is NOT enforced"
@@ -75,6 +87,11 @@ app.include_router(diagnoses.router)
 app.include_router(decisions.router)
 app.include_router(policy.router)
 app.include_router(executions.router)
+# Two routers from Stage 6. The webhook receiver has no `database_ready` dependency
+# so that signature rejection is unconditional — see `app/routes/webhooks.py`.
+app.include_router(webhooks.webhook_router)
+app.include_router(webhooks.router)
+app.include_router(promises.router)
 
 
 @app.get("/", tags=["health"])

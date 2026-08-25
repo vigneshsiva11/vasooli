@@ -324,3 +324,52 @@ passages point at it and at this file.
 * `scripts/s4_adversarial.py` **exit 0** (137 refused), `scripts/s5_audit.py`
   **exit 0**, `scripts/s5_adversarial.py` **exit 0** (120 refused).
 
+---
+
+## 2026-08-25 — open finding, NOT a correction: no receivable path can be verified
+
+Nothing was changed for this entry. No document was written, edited or deleted, and
+no code was altered. It is recorded here because it was found while building Stage 6
+and the stage's scope boundary forbade acting on it, and a finding held only in a
+closing report is a finding that stops existing when the session does.
+
+### The gap
+
+Three facts that are each individually reasonable and jointly leave a hole:
+
+1. `app/decision/matrix.py`, receivable block — **every** candidate intervention for
+   every receivable root cause is contact-type. `reminder`,
+   `escalating_reminder_sequence`, `manual_escalation`, `payment_plan_offer`,
+   `recovery_payment_link` (reclassified as contact-type in Stage 4 hardening). None
+   of them causes a Razorpay payment link to be created.
+2. Stage 6 Part A writes a `VerificationRecord` only in response to a Razorpay
+   `payment_link.paid` webhook — that is, only for an event whose recovery actually
+   created a link.
+3. Therefore **no receivable event can ever be verified as recovered by this
+   system.** Money can come back; the webhook that would tell us never fires,
+   because we never gave Razorpay a link to fire it about.
+
+### Why it mattered to Stage 6 rather than Stage 4
+
+The first draft of `app/ptp/store.py` restricted promises to the receivable surface,
+on the reasoning that a promise to pay is a receivables concept. Combined with the
+above, that made `promised -> honored` **unreachable in production**: a receivable
+promise could be broken, chased and re-chased, but the one transition the entire
+safety property is built around could only ever have been exercised by a test.
+
+The restriction was dropped rather than the transition, and replaced with a
+terminal-status guard (`NON_PROMISABLE_STATUSES = TERMINAL_EVENT_STATUSES`). A
+promise against a failed card payment that somebody has said they will settle is a
+real thing to record, and it is verifiable, because that surface does produce links.
+The comment at `app/ptp/store.py:176` states this in full at the point of the
+decision.
+
+### Not fixed here, deliberately
+
+The fix would be a change to the decision matrix — some receivable root cause
+resolving to a link-producing intervention — and that is a Stage 3/4 economic
+judgement about what the right recovery action for an unpaid invoice actually is, not
+a Stage 6 plumbing detail. Stage 6 was given an explicit scope boundary against
+re-opening the decision engine, so this is reported and left. It is the first thing
+to look at if receivable recovery is ever expected to close the loop.
+
