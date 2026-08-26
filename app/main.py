@@ -1,8 +1,9 @@
 """Vasooli — FastAPI application entrypoint.
 
-Wires up configuration, the MongoDB connection lifecycle, and the health-check
-route. Pipeline stages (ingestion → diagnosis → decision → policy → execution →
-verification) live in their own packages under `app/` and are not mounted yet.
+Wires up configuration, the MongoDB connection lifecycle, the health-check route,
+and every stage's router. The pipeline stages (ingestion → diagnosis → decision →
+policy → execution → verification → promise-to-pay) live in their own packages
+under `app/`, with the read-only metrics and audit layer mounted last.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from app.routes import (
     diagnoses,
     events,
     executions,
+    metrics,
     policy,
     promises,
     webhooks,
@@ -92,6 +94,9 @@ app.include_router(executions.router)
 app.include_router(webhooks.webhook_router)
 app.include_router(webhooks.router)
 app.include_router(promises.router)
+# Stage 7. Read-only: this router declares GET routes and nothing else, and calls
+# no index-ensuring function above because it creates no collection of its own.
+app.include_router(metrics.router)
 
 
 @app.get("/", tags=["health"])

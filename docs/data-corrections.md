@@ -373,3 +373,179 @@ a Stage 6 plumbing detail. Stage 6 was given an explicit scope boundary against
 re-opening the decision engine, so this is reported and left. It is the first thing
 to look at if receivable recovery is ever expected to close the loop.
 
+
+---
+
+## 2026-08-26 — open finding, NOT a correction: eleven recovered verification records describe four payments
+
+Nothing was changed for this entry. No document was written, edited or deleted, and
+no code in Stages 1-6 was altered. Stage 7 was given an explicit rule — "if you find
+a data quality issue while building aggregations, note it in docs/data-corrections.md
+and tell me — do not silently exclude records or fix underlying data without asking"
+— and this is the entry that rule asked for.
+
+### What was found
+
+`GET /metrics/summary` was specified as summing `amount_recovered` across every
+`VerificationRecord` with `outcome="recovered"`. Taken literally, that sum is
+**22,500.00 INR**. The eleven records it sums describe **four** payments:
+
+| event | payment link | recovered records | amount each | literal sum | actually paid |
+|---|---|---|---|---|---|
+| `exe_S5ADV_20260825T045458_HONEST` | `plink_TTsV8YH18jku14` | 6 | 2,200.00 | 13,200.00 | 2,200.00 |
+| `exe_S5_20260825T042248_DRETRY` | `plink_TTrxBuptDYfom8` | 3 | 2,000.00 | 6,000.00 | 2,000.00 |
+| `ptp_20260825T111455_C` | `plink_TTyyRX5VdP3kKj` | 1 | 1,650.00 | 1,650.00 | 1,650.00 |
+| `ptp_20260825T112307_C` | `plink_TTz7C9begJ4nhD` | 1 | 1,650.00 | 1,650.00 | 1,650.00 |
+| | | **11** | | **22,500.00** | **7,500.00** |
+
+The literal reading reports **15,000.00 INR of money that never existed** — twice the
+amount that did.
+
+### Why the duplicates exist, and why they are not corrupt
+
+They are correct records of what actually arrived. Stage 6's Part A verification
+harness is re-runnable, and each run mints a fresh `x-razorpay-event-id`
+(`s6a_paid_01`, `s6a_20260825T075440_paid_01`, `s6a_20260825T161504_paid_01`, …).
+`razorpay_event_id` carries a unique index, which is what makes webhook delivery
+idempotent — so a *different* event id is by design a *different* event, and each
+one legitimately produced its own append-only record. The dedup logic did exactly
+what it was built to do.
+
+What no layer was ever asked to know is that a payment link is **paid once**. Three
+harness runs against one link produce three honest records of three distinct Razorpay
+events describing one payment. `GET /audit-trail/exe_S5ADV_20260825T045458_HONEST`
+shows this plainly: nine verification records, six of them `recovered`, one execution,
+one link.
+
+### What Stage 7 does about it
+
+It counts each recovered payment **once per execution**, taking the latest record by
+`verified_at`, and it says so in the response rather than in a comment:
+
+* `total_revenue_recovered: 7500.0` — the deduped figure
+* `recovered_verification_records: 11` — the raw count, unchanged
+* `distinct_recoveries_counted: 4`
+* `duplicate_verification_records_ignored: 7`
+* `methodology` — states the rule and the reason in the payload itself
+
+"Ignored" means ignored *by this sum*. The seven records remain exactly where they
+are, because in the `verifications` collection they are an accurate record of what
+Razorpay sent, and deleting them would destroy evidence to make a total look tidy.
+The dedup happens at read time, every request, and is visible in the response.
+
+This was implemented as a unilateral call, under an instruction to proceed rather than
+open a ratification round, and **ratified on 2026-08-26**: the deduped figure with the
+raw/deduped breakdown exposed. It is reversible in one place — `distinct_recoveries()`
+in `app/metrics/reader.py` — and both figures are on the wire, so nothing was hidden by
+making it before it was ratified.
+
+### Not fixed here, deliberately
+
+Two candidate fixes exist and both are out of Stage 7's read-only scope:
+
+1. **Constrain at write time** — a unique index on `(execution_id, outcome)` in
+   `app/webhooks/store.py`, so a second `paid` for one execution is rejected rather
+   than stored. This would trade idempotency-by-event-id for
+   idempotency-by-outcome, and it changes Stage 6 behaviour.
+2. **Make the harness non-re-runnable** — have Stage 6's Part A fixtures create a
+   fresh event and link per run instead of reusing `exe_S5ADV_..._HONEST`. Cleaner,
+   but it means the harness stops testing repeat delivery against a link that has
+   already been paid, which is a real production case worth keeping.
+
+Neither is a Stage 7 decision. The read-time dedup makes the reported number correct
+today without touching either.
+
+### One more thing worth knowing about the same event
+
+`exe_S5_20260825T042248_DRETRY`'s three records carry `amount_mismatch=True`: Razorpay
+reported **2,000.00** against an `amount_expected` of **2,050.00** — a 50.00 shortfall.
+That flag is Stage 6 working correctly — it is recorded, not reconciled — and Stage 7
+reports the amount Razorpay stated (2,000.00), not the amount that was expected. So
+2,000.00 of the headline 7,500.00 is a short payment that no layer has reconciled.
+Flagged here because an `amount_mismatch=True` recovery sitting inside a headline total
+is worth a human look, and Stage 7 was not authorized to resolve it.
+
+---
+
+## 2026-08-26 — ratified decision, NOT a correction: `total_revenue_at_risk` excludes nothing
+
+Nothing was changed for this entry either. It records a decision about **scope** rather
+than a correction to data, and it is here because the decision is invisible in the code
+— non-exclusion leaves no filter behind to read — and because it is the one figure most
+likely to be quoted out of this system.
+
+Stage 7 was asked to sum `amount` across all `RevenueEvent`s "excluding any events you
+can identify as synthetic test fixtures created purely for adversarial testing during
+Stages 2-6". Stage 7 excludes **nothing** and reports all **105 events / 744,127.75
+INR**. Ratified 2026-08-26.
+
+### Why exclusion was not possible to do honestly
+
+**Every event in this dataset is synthetic.** There is no production traffic. So the
+instruction cannot mean "keep the real ones" — it can only mean "draw a line through a
+uniformly synthetic population", and there is no principled place to draw it. The
+population, grouped by the id prefix each stage's harness used:
+
+| prefix family | n | at risk | % of total | what it is |
+|---|---|---|---|---|
+| `pol_S4_` | 38 | 195,600.00 | 26.3% | Stage 4 policy harness |
+| `dec_S3_` | 9 | 175,349.00 | 23.6% | Stage 3 decision harness |
+| `rcv_S2_` | 2 | 173,000.00 | 23.2% | Stage 2 seed, plausible business event |
+| `exe_S5ADV_` | 10 | 79,000.00 | 10.6% | Stage 5 adversarial harness |
+| `exe_S5_` | 21 | 56,010.00 | 7.5% | Stage 5 execution harness |
+| `pay_S2_` | 4 | 33,999.00 | 4.6% | Stage 2 seed, plausible business event |
+| `ptp_` | 12 | 13,800.00 | 1.9% | Stage 6 PTP harness |
+| `evt_test_` | 1 | 4,999.00 | 0.7% | smoke test |
+| `chk_S2_` | 1 | 3,499.00 | 0.5% | Stage 2 seed, plausible business event |
+| (other) | 1 | 2,499.50 | 0.3% | plausible business event |
+| `pay_DUP_TEST` | 1 | 1,875.25 | 0.3% | idempotency test |
+| `adv_` | 2 | 1,800.00 | 0.2% | Stage 6 adversarial harness |
+| `sub_S2_` | 2 | 1,798.00 | 0.2% | Stage 2 seed, plausible business event |
+| `pay_RACE_` | 1 | 899.00 | 0.1% | race test |
+| **total** | **105** | **744,127.75** | **100.0%** | |
+
+### The sensitivity is the whole argument
+
+Two criteria, each defensible, and the headline moves by more than 3×:
+
+* **Narrow** — adversarial suites and explicitly-named test fixtures only
+  (`exe_S5ADV_`, `adv_`, `evt_test_`, `pay_DUP_TEST`, `pay_RACE_`, `pay_S2_INJECT`):
+  **16 events / 89,572.25 / 12.0%** excluded → would report **654,555.50**.
+* **Broad** — every per-stage harness cohort, i.e. everything that exists because a
+  stage needed a fixture: **96 events / 530,331.25 / 71.3%** excluded → would report
+  **213,796.50**.
+
+Only about 10 of the 105 events (the `*_S2_*` seeds plus one unprefixed event,
+214,795.50) look like plausible business events at all. A headline that can be
+654,555.50 or 213,796.50 depending on an unratified judgement is not a measurement, and
+encoding either one would have buried that judgement in a filter nobody would think to
+question later.
+
+An earlier draft of this finding quoted a third, intermediate criterion (22 events /
+375,671.25 / 50.5%). That figure was one arbitrary line among many rather than *the*
+cohort size, which is precisely the point; the spread above supersedes it.
+
+### What is reported instead
+
+The sum over everything, plus the split that lets a reader take the rate either way:
+
+* `total_revenue_at_risk: 744127.75` — all 105 events, nothing excluded
+* `non_recoverable_at_risk: 148299.0` — the portion the system deliberately declined to
+  chase, derived from each event's own latest `Diagnosis.recoverable` flag rather than
+  from a hardcoded list (dispute 125,000 + fraud 22,000 + churn 1,299)
+* `total_events: 105` and `events_without_decision: 1`
+* `methodology` — states the non-exclusion and its reason in the payload itself
+
+`GET /metrics/baseline-comparison` narrows separately and on a stated rule — latest
+diagnosis `recoverable=True` — giving `eligible_events: 101` and
+`eligible_revenue_at_risk: 594829.75`, with `excluded_non_recoverable: 3` and
+`excluded_undiagnosed: 1` disclosed on the response.
+
+### How to reverse this
+
+One filter in `load_snapshot()` in `app/metrics/reader.py`, given a ratified list of
+event ids or prefixes. Nothing else in Stage 7 assumes the full population — every
+figure derives from the snapshot it is handed. If a cohort is ever excluded, the
+excluded count and amount should be reported on `/metrics/summary` alongside the total,
+for the same reason the dedup exposes its raw count: a subtraction the reader cannot see
+is a subtraction the reader cannot check.
