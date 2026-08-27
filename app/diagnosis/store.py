@@ -65,18 +65,30 @@ async def latest_version(event_id: str) -> int:
 
 
 async def append(
-    diagnosis: Diagnosis, method: DiagnosisMethod
+    diagnosis: Diagnosis,
+    method: DiagnosisMethod,
+    llm_model: str | None = None,
 ) -> tuple[str, int]:
     """Store a diagnosis as the next version for its event.
 
     Retries on a version collision rather than serialising writes, so two
     simultaneous diagnoses of one event both land, as versions N and N+1.
 
+    Args:
+        diagnosis: The validated explanation.
+        method: Which path produced it.
+        llm_model: The model that produced it, when one was called. Written on every
+            document — including as an explicit `None` on rules-path records, so a
+            missing field means "written before provenance was recorded" and a null
+            field means "no model was involved". Those are different facts and the
+            storage layer keeps them distinguishable.
+
     Returns:
         The new document's id and its version.
     """
     payload = diagnosis.model_dump()
     payload["method"] = method
+    payload["llm_model"] = llm_model
 
     for attempt in range(1, MAX_VERSION_ATTEMPTS + 1):
         version = await latest_version(diagnosis.event_id) + 1

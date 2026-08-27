@@ -1,0 +1,60 @@
+{
+  "archived_at": "20260827T102709Z",
+  "reason": "Checkpoint 5 ran before checkpoint 6, so these 4 payments were recorded before the promises they settle. Deleted and re-delivered in the correct order, reusing the same razorpay_event_id. Content, amount and outcome unchanged.",
+  "collection": "verifications",
+  "count": 4,
+  "documents": [
+    {
+      "_id": "6a900742b57db0e66a19dc9a",
+      "event_id": "demo_002_pay",
+      "execution_id": "6a8ffbc91cbbe8161ee84683",
+      "razorpay_event_id": "evt_s8paid_demo_002_pay",
+      "razorpay_event": "payment_link.paid",
+      "razorpay_payment_link_id": "plink_TUjgX3HvH7S9Yx",
+      "outcome": "recovered",
+      "amount_recovered": 674.0,
+      "amount_expected": 674.0,
+      "amount_mismatch": false,
+      "verified_at": "2026-08-27 09:45:38.296000"
+    },
+    {
+      "_id": "6a900743b57db0e66a19dc9d",
+      "event_id": "demo_019_pay",
+      "execution_id": "6a8ffe0d1cbbe8161ee8468f",
+      "razorpay_event_id": "evt_s8paid_demo_019_pay",
+      "razorpay_event": "payment_link.paid",
+      "razorpay_payment_link_id": "plink_TUjqkMgkiYIp0P",
+      "outcome": "recovered",
+      "amount_recovered": 1298.0,
+      "amount_expected": 1298.0,
+      "amount_mismatch": false,
+      "verified_at": "2026-08-27 09:45:39.804000"
+    },
+    {
+      "_id": "6a900744b57db0e66a19dc9f",
+      "event_id": "demo_108_chk",
+      "execution_id": "6a8ffe561cbbe8161ee84693",
+      "razorpay_event_id": "evt_s8paid_demo_108_chk",
+      "razorpay_event": "payment_link.paid",
+      "razorpay_payment_link_id": "plink_TUjs1QtNKHV328",
+      "outcome": "recovered",
+      "amount_recovered": 3566.0,
+      "amount_expected": 3566.0,
+      "amount_mismatch": false,
+      "verified_at": "2026-08-27 09:45:40.799000"
+    },
+    {
+      "_id": "6a900747b57db0e66a19dca4",
+      "event_id": "demo_150_sub",
+      "execution_id": "6a8fff031cbbe8161ee8469c",
+      "razorpay_event_id": "evt_s8paid_demo_150_sub",
+      "razorpay_event": "payment_link.paid",
+      "razorpay_payment_link_id": "plink_TUjv4KGQ81arr7",
+      "outcome": "recovered",
+      "amount_recovered": 225.99,
+      "amount_expected": 225.99,
+      "amount_mismatch": false,
+      "verified_at": "2026-08-27 09:45:43.347000"
+    }
+  ]
+}

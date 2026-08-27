@@ -197,6 +197,32 @@ class DiagnosisRecord(Diagnosis):
         ...,
         description="Which path produced this diagnosis.",
     )
+    llm_model: str | None = Field(
+        default=None,
+        max_length=120,
+        description=(
+            "The model identifier that produced this diagnosis, or None when no "
+            "model was called. `method` says whether an LLM was involved; this "
+            "says which one. Provenance only — not a reproducibility guarantee, "
+            "since a provider can change behaviour behind a stable model name."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _llm_model_only_when_a_model_answered(self) -> "DiagnosisRecord":
+        """Keep `llm_model` and `method` from disagreeing about what happened.
+
+        A rules-path record naming a model would be a false provenance claim, which
+        is worse than no claim at all. Note the converse is deliberately allowed:
+        `method="llm"` with `llm_model=None` is how records written before this field
+        existed read back, and silently inventing a name for them would be a lie.
+        """
+        if self.method == "rules" and self.llm_model is not None:
+            raise ValueError(
+                "method 'rules' means no model was called, so llm_model must be None; "
+                f"got {self.llm_model!r}"
+            )
+        return self
 
     @classmethod
     def from_document(cls, document: dict[str, Any]) -> "DiagnosisRecord":

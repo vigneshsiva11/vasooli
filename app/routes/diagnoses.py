@@ -47,15 +47,16 @@ async def diagnose_event(event_id: str) -> DiagnosisRecord:
         event.customer_ref, event.created_at, event.event_id
     )
 
-    diagnosis, method = await diagnosis_stage.diagnose(
+    diagnosis, method, llm_model = await diagnosis_stage.diagnose(
         event, prior_event_count=prior_event_count
     )
-    document_id, version = await diagnosis_stage.append(diagnosis, method)
+    document_id, version = await diagnosis_stage.append(diagnosis, method, llm_model)
 
     return DiagnosisRecord(
         id=document_id,
         version=version,
         method=method,
+        llm_model=llm_model,
         **diagnosis.model_dump(),
     )
 

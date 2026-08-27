@@ -378,6 +378,12 @@ to look at if receivable recovery is ever expected to close the loop.
 
 ## 2026-08-26 — open finding, NOT a correction: eleven recovered verification records describe four payments
 
+> **Annotation added 2026-08-27, after checkpoint 7. Nothing below is rewritten.**
+> The finding still stands; its counts have grown with the dataset. At 305-event
+> scale it is **24 recovered records describing 17 distinct payments**, 7 ignored as
+> duplicates, a literal sum of 44,605.14 against a deduped **29,605.14**. See the
+> final entry in this file.
+
 Nothing was changed for this entry. No document was written, edited or deleted, and
 no code in Stages 1-6 was altered. Stage 7 was given an explicit rule — "if you find
 a data quality issue while building aggregations, note it in docs/data-corrections.md
@@ -549,3 +555,637 @@ figure derives from the snapshot it is handed. If a cohort is ever excluded, the
 excluded count and amount should be reported on `/metrics/summary` alongside the total,
 for the same reason the dedup exposes its raw count: a subtraction the reader cannot see
 is a subtraction the reader cannot check.
+
+---
+
+## 2026-08-26 — provenance disclosure: 16 demo diagnoses came from `gemini-3.5-flash-lite`, not `gemini-3.6-flash`
+
+No stored document was deleted or edited for this entry. Sixteen diagnoses were
+**appended** through the ordinary route, and a field was added so that they can say
+which model produced them. It is recorded here because the Stage 8 demo dataset is
+the thing a reader will judge the system's diagnosis quality by, and "which model
+answered" is not derivable from the data afterwards unless it was written down at
+the time.
+
+### What happened
+
+The demo batch is 200 events. 184 resolve on the deterministic rules path and never
+reach a model. The remaining **16** carry deliberately ambiguous free text that no
+regex in `app/diagnosis/rules.py` matches, so `classify()` returns `None` and the
+pipeline consults Gemini — that is the whole point of those 16, and it is verified
+offline before any call is spent.
+
+Those 16 were diagnosed on **`gemini-3.5-flash-lite`**. The configured model for
+Stages 1–7 was `gemini-3.6-flash`, and every other Gemini-produced record in this
+database came from it.
+
+### Why
+
+The Gemini free tier allows **20 `generateContent` requests per day, per model, per
+project** — `quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier`. The
+`gemini-3.6-flash` bucket was exhausted during dataset generation: 8 calls at
+checkpoint 1 (4 of them latency probing) and 13 on the ambiguity probe that
+established these 16 strings actually reach the model and are answerable, totalling
+21 attempts against a ceiling of 20.
+
+The quota id is **per model**, which is the load-bearing detail. A sibling model has
+its own untouched bucket, so switching models made 16 further calls possible the same
+day without waiting for the 00:00 Pacific reset. Ratified explicitly: *"staying on
+the free tier, no billing enabled … use `gemini-3.5-flash-lite` instead of waiting
+for the `gemini-3.6-flash` daily quota reset."*
+
+The switch is one line in `.env` (`GEMINI_MODEL`). No code selects a model; the
+pipeline reads one from config, which is why this is a configuration disclosure and
+not a code change.
+
+### The 16 events
+
+Diagnosed via `POST /diagnose/{event_id}` — the real route, real prompt builder,
+`temperature=0.0`, real response schema. Script: `scripts/s8_llm_diagnose.py`.
+
+| event | surface | what a careful analyst reads | model answered | stored confidence | agrees |
+|---|---|---|---|---|---|
+| `demo_009_pay` | payment | *(unanswerable)* | `unknown` | 0.20 | n/a |
+| `demo_029_pay` | payment | `insufficient_funds` | `insufficient_funds` | 0.90 | yes |
+| `demo_062_pay` | payment | `card_expired` | `card_expired` | 0.90 | yes |
+| `demo_072_pay` | payment | `issuer_declined` | `issuer_declined` | 0.90 | yes |
+| `demo_073_pay` | payment | `temporary_processing_error` | `temporary_processing_error` | 0.90 | yes |
+| `demo_083_pay` | payment | *(unanswerable)* | `unknown` | 0.20 | n/a |
+| `demo_087_pay` | payment | `insufficient_funds` | `insufficient_funds` | 0.90 | yes |
+| `demo_105_chk` | checkout | *(unanswerable — no failure text at all)* | `unknown` | 0.10 | n/a |
+| `demo_109_chk` | checkout | `checkout_friction` | `checkout_friction` | 0.90 | yes |
+| `demo_116_chk` | checkout | `technical_error` | `technical_error` | 0.90 | yes |
+| `demo_118_chk` | checkout | `payment_method_unavailable` | `payment_method_unavailable` | 0.90 | yes |
+| `demo_163_sub` | subscription | `mandate_expired` | `mandate_expired` | 0.90 | yes |
+| `demo_167_sub` | subscription | `insufficient_funds` | `insufficient_funds` | 0.90 | yes |
+| `demo_178_rcv` | receivable | `genuine_delay` | `genuine_delay` | 0.90 | yes |
+| `demo_180_rcv` | receivable | `non_responsive` | `non_responsive` | 0.90 | yes |
+| `demo_190_rcv` | receivable | `genuine_delay` | `genuine_delay` | 0.90 | yes |
+
+**13 of 13** answerable strings matched the analyst's reading and cleared the
+decision stage's `CONFIDENCE_FLOOR` of 0.5. **3 of 3** deliberately-unanswerable
+strings came back `unknown` *below* the floor, so `app/decision/engine.py` routes
+them to `no_action_low_confidence` — the guardrail case, where a confident wrong
+answer would be the failure and an admission of ignorance is the correct output.
+
+Agreement is **reported, not asserted**. `scripts/s8_llm_diagnose.py` makes only the
+confidence-floor behaviour pass/fail; the classification is the model's, and a
+divergence would have been printed as a divergence rather than as a test failure.
+
+### Two things the stored numbers do not say
+
+**The 0.90s are at a ceiling, not a measurement.** `LLM_CONFIDENCE_CEILING = 0.90`
+in `app/diagnosis/service.py` clamps whatever a model states. The earlier probe
+called `gemini.propose_diagnosis` directly and saw raw values of 0.88–0.95 for the
+same strings. So every stored `0.9` above means "the model said 0.90 or more" and
+cannot be read as "the model said exactly 0.90". The unanswerable rows are below the
+ceiling and are therefore the model's own unmodified numbers.
+
+**The two models are not equally cautious about ignorance.** On `gemini-3.6-flash`
+the probe measured `demo_009_pay`'s string at `unknown`/**0.35** and
+`demo_083_pay`'s at `unknown`/**0.40**. On `gemini-3.5-flash-lite` through the
+pipeline they are **0.20** and **0.20**. Both models land on the same side of the
+0.5 floor, so the guardrail holds either way, but the margin differs by roughly half
+and that difference is a property of the model, not of the event.
+
+### Prior art for the same substitution
+
+`demo_029_pay` and `demo_062_pay` were already measured on `gemini-3.5-flash-lite`
+during the ambiguity probe, for the same quota reason, and `scripts/s8_ambiguity_probe.py`
+records that at the two affected entries in `ALREADY_MEASURED` rather than letting them
+sit unlabelled among the `3.6-flash` measurements. Both were re-diagnosed through the
+real pipeline here, so their stored records are pipeline output rather than probe output.
+Their answers agreed across both readings (`insufficient_funds` 0.95 → 0.90 clamped;
+`card_expired` 0.95 → 0.90 clamped).
+
+### The scope waiver this required
+
+Stage 8's standing rule was *"do not modify diagnosis, decision, policy, execution,
+verification, or PTP logic in this stage."* Recording the model **had** to be a code
+change, because nothing persisted it: `DiagnosisMethod` says whether an LLM was
+involved, never which one. The waiver was requested before any call was spent and
+ratified for this single field.
+
+Four files, no behavioural change to any classification:
+
+* `app/models/diagnosis.py` — `llm_model: str | None` on `DiagnosisRecord` (the
+  stored form), **not** on `Diagnosis`. The domain contract stays "an explanation,
+  and nothing else"; which model produced it is a fact about how the record was made.
+  A `_llm_model_only_when_a_model_answered` validator rejects `method="rules"` with a
+  named model, since a rules record naming a model is a false provenance claim.
+* `app/diagnosis/service.py` — `diagnose()` now returns a 3-tuple. The model name is
+  read once from `get_settings()`, which is `@lru_cache`d, so it is provably the same
+  value `propose_diagnosis` used rather than a second guess at it. It is recorded on
+  the failure paths too: a `GeminiUnavailable` fallback names the model that was
+  unreachable, and a rejected out-of-vocabulary root cause names the model that
+  answered badly.
+* `app/diagnosis/store.py` — writes the field on **every** document, including as an
+  explicit `null` on rules-path records.
+* `app/routes/diagnoses.py` — the only caller; unpacks the tuple and returns the field.
+
+The route was verified on a rules-path event (`demo_001_pay`, zero Gemini cost) and
+the validator on all six `method`/`llm_model` combinations before the 16 calls were
+spent. The quota allowed one attempt, so the field had to exist first, not after —
+adding it afterwards would have meant either 16 more calls or a backfill, and a
+backfilled provenance label is the same weak claim this project already had to
+correct once for rulebook fingerprints.
+
+### Three states, deliberately distinguishable
+
+`append()` writes an explicit `null` rather than omitting the field, so the
+collection now holds three genuinely different facts about its 253 demo diagnosis
+versions, and no reader has to guess which:
+
+| state in MongoDB | means | current demo diagnoses |
+|---|---|---|
+| key absent | written before provenance was recorded | 183 |
+| key present, `null` | no model was called | 1 (`demo_001_pay`) |
+| key present, named | that model produced it | 16 |
+
+### What was NOT done, and how to reverse it
+
+**The 183 were not re-diagnosed.** Their current diagnosis predates the field, so
+the key is simply absent. Re-running them is free of Gemini cost — the rules path
+never calls a model — but it would append 183 diagnosis versions to an append-only
+collection purely so a field reads `null` instead of being missing, and
+`method="rules"` already states unambiguously that no model was involved. The
+asymmetry is disclosed here rather than papered over.
+
+To make the batch uniform: re-`POST /diagnose/{event_id}` for the 183, which is
+deterministic and adds one version each. Worth doing only before any decision pins
+a diagnosis id — after that it puts every pinned decision one version behind, which
+`scripts/s4_audit.py` §6 reports as a finding, correctly.
+
+**No claim of reproducibility is being made.** A recorded model name is provenance:
+it says which model answered. It is not a guarantee that asking again returns the
+same thing. `temperature=0.0` narrows variation but does not eliminate it, and a
+provider can change behaviour behind a stable model name. This is the same
+distinction the rulebook-fingerprint entry above had to be corrected for — a claim
+that is true when written and decays quietly afterwards — so it is stated as the
+weaker thing from the start.
+
+### Verification
+
+* `scripts/s8_llm_diagnose.py` — **9 passed, 0 failed**. 16/16 HTTP 201, all
+  `method="llm"`, zero fallbacks, all naming `gemini-3.5-flash-lite`, every root
+  cause legal for its surface.
+* `scripts/s8_diagnosis_gaps.py` — **9 passed, 0 failed**, read from raw MongoDB and
+  cross-checked over HTTP. 200/200 demo events diagnosed, **0 outstanding gaps**,
+  current methods 184 rules / 16 llm / **0 fallback**, 184/184 rules-path root causes
+  matching the offline prediction, and the set of model-diagnosed events exactly
+  equal to the set predicted offline.
+* Demo money at risk unchanged at **1,443,090.27** — diagnosis does not touch
+  amounts, and a change here would have meant something else went wrong.
+
+
+---
+
+## 2026-08-27 — 65 execution records superseded, in two passes, and a wrong diagnosis corrected
+
+`executions` is not append-only in the sense `policy_verdicts` is, but it is the
+record of side effects that reached a payment gateway, so deleting from it is held
+to the same standard. Two deletions happened on this date, for two different
+reasons, and the second one exists because the reason given for the first was
+partly wrong.
+
+### Pass 1 — 62 records, gateway-refused against an exhausted account
+
+The first checkpoint 4 run attempted 62 executions needing 59 real Razorpay
+test-mode payment links. 8 completed, 54 failed. Every failure stored the same
+verbatim gateway text:
+
+```
+Razorpay returned HTTP 429 — BAD_REQUEST_ERROR: Too many requests
+```
+
+whose unmasked body was `RATE_LIMIT_EXCEEDED — "test mode limit of 30 reached for
+payment_link"`. That account held 30 links and Razorpay test mode allows 30 per
+account for the account's lifetime; cancelling one does not return its slot. The
+54 were therefore not retryable on those credentials, and the 5 links the run did
+create sat on an account the demo was moving off, where nothing downstream could
+verify them.
+
+* **archive**: `.s8_archive/executions_superseded_20260827T085506Z.json`, 62
+  documents, 38,103 bytes, written and read back before anything was deleted
+* **verified after**: 0 demo executions remained; all 31 fixture executions
+  survived, matched by document `_id` rather than by count, because a count match
+  alone would not rule out a swap
+* **not deleted anywhere**: the 5 links created on the old account remain there as
+  orphans — `plink_TUMOKvoDvR8vPU`, `plink_TUMOMhtZUiVM2Y`, `plink_TUMONz21okUsEO`,
+  `plink_TUMOPFVOVnvtvY`, `plink_TUMOQfDTPUN9n8`. Along with 5 `vslprobe_`
+  throwaways, they are why that account reads 30/30.
+
+### The wrong part: there are TWO limits, not one
+
+The re-run on a fresh account with **0 of 30 slots used** accepted 5 creates in
+about 16 seconds and then refused the 6th, 7th and 8th — with **25 slots still
+free**. 87 seconds later a single create was accepted again. So:
+
+| limit | scope | what it does | costs a slot when refused? |
+|---|---|---|---|
+| lifetime ceiling, 30 links | per merchant account, permanent | refuses forever once reached | no |
+| burst limit, ~5 creates / ~60s | per account, transient | refuses until the window clears | no |
+
+Both are real, and the old account had hit both. The first run's 54 failures are
+still correctly attributed to the lifetime ceiling — that account genuinely read
+30/30 and its error body said so in those words.
+
+**What was concluded too strongly.** Stage 8 tooling recorded that this was "not a
+rate limit," on the strength of a probe that made 15 creates at 3-second gaps and
+had 0 accepted, with failures persisting 11 hours. That probe ran against the
+already-exhausted account, where every create fails at any pace, so it could not
+distinguish the two mechanisms — it confirmed the lifetime cap and was read as
+excluding a burst limit. The 11-hour persistence is likewise fully explained by
+30/30 and says nothing about pacing.
+
+The coincidence that made this convincing is that both accounts accepted **exactly
+5** links before refusing. On the old account 5 was its remaining headroom to
+30/30. On the new one 5 is the burst allowance. Same number, different mechanism.
+
+Three claims in `scripts/` asserted the stronger version and were corrected in
+place: the `--link-budget` help text, the printed budget check ("refusals are not
+retryable"), and the archive `reason` for this pass. A spent slot never coming back
+is true; a refused create being unretryable is not.
+
+### Pass 2 — 3 records, refused by the burst limit
+
+`scripts/s8_supersede.py --only-failed` cleared the three records the paced re-run
+needed to retry (`demo_007_pay`, `demo_008_pay`, `demo_010_pay`), keeping the 5
+that had completed. Deletion is keyed on `_id`, not `event_id`, so an event holding
+both a completed and a failed record could not lose the completed one.
+
+* **archive**: `.s8_archive/executions_superseded_20260827T090023Z.json`, 3
+  documents, 2,231 bytes
+* **no Razorpay link was orphaned** — all three were refused before a link existed
+* **why they had to go**: `policy_verdict_id` carries a unique index, so an event
+  that already holds any execution record replays as HTTP 200 instead of calling
+  the gateway. Left in place, the retry would have reported success while doing
+  nothing — which is exactly what the 54 stale records did to the first re-run
+  attempt.
+
+### What made the difference, and what caught it
+
+Two pieces of Stage 8 tooling, both added on this date:
+
+* a **circuit breaker** (3 consecutive failures) in `scripts/s8_execute.py`. The
+  first run wrote 54 dead records because nothing was watching; the re-run stopped
+  at 8 of 28. Because a gateway refusal arrives as HTTP **201** with
+  `status="failed"` — which is how the first run reported `{201: 62}` while 54 of
+  them were dead — the breaker inspects the stored record, not the status code.
+* a **`--gap`** applied before link-creating calls only, since contact-type actions
+  call no external API. At 15 seconds, 20 consecutive creates were accepted with
+  zero refusals.
+
+### Final state
+
+| | value |
+|---|---|
+| demo executions | **28, all `completed`, 0 failed** |
+| real payment links | 25, all with an `https` URL, 25 distinct ids |
+| templated contacts | 3, none carrying a link artifact |
+| distinct policy verdicts pinned | 28 |
+| fixture executions | 31, untouched |
+| money chased | 43,644.89 |
+| modelled intervention spend | 170.00 |
+| new account slots consumed | 26 of 30 — 25 demo + 1 diagnostic probe |
+
+5 of the 25 links were created by the unpaced first attempt on this same account
+and were kept rather than re-created, via `--resume`. Re-creating them would have
+spent 5 more of a 30-slot lifetime for no gain.
+
+Confirmed by raw `pymongo` against the collection, with no `app/` imports, and
+independently by `GET /executions?history=true`. Both agree on every figure above.
+
+### How to reverse this
+
+Both archives hold the deleted documents verbatim, including `_id`, so
+`insertMany` restores either pass exactly. What cannot be restored is the gateway
+side: the 5 orphaned links on the old account still exist but are unreachable with
+the current credentials, and the 54 refused creates never produced a link to
+restore.
+
+**4 slots remain on the current account.** Checkpoint 5 cancels and pays existing
+links rather than creating new ones, so this is sufficient — but it is a hard
+number, and a third account would restart the provenance problem this entry
+documents.
+
+---
+
+## 2026-08-27 — Checkpoint 5: the ~35% executed-cohort recovery rate is superseded by 46.4%, and 3 of 25 verification outcomes are a disclosed override
+
+> **Annotation added 2026-08-27, after checkpoint 7. Nothing below is rewritten.**
+> Both figures this entry reports have since been superseded. The executed-cohort
+> rate reported across the whole dataset is now **39.53%** (17 of 43 link-producing
+> executions); the **46.4%** below is retained only as "the ratified demo cohort".
+> The **~2.4%** headline named below was a pre-execution forecast that never
+> reproduced — the measured headline is **1.35%**. See the final entry in this file.
+
+### What changed
+
+The recovery figure ratified at checkpoint 0 was **~35% of the executed cohort**.
+The number now reported is **46.4% (13 of 28 executed)**, and the earlier figure
+should not be quoted anywhere alongside it.
+
+The **~2.4% headline recovery rate remains a separate reported number** and is not
+reconciled with this one, per the standing instruction. The two answer different
+questions: the headline is recovered money over all revenue at risk in the dataset,
+the cohort rate is recovered links over links actually executed against.
+
+### Why it moved
+
+Checkpoint 5 assigns each of the 25 link-carrying executions an outcome from the
+`recovery_probability` its own decision record already stored, drawn against a
+per-event seeded value (`sha256("s8_verify:" + event_id)`). Sum of probabilities
+over the 25 links is **8.68** — the matrix's expected recovery count. The seeded
+draw realised **10**, which is a normal high-side deviation, not a defect.
+
+Three events were then **forced from not-recovered to recovered**:
+
+| event | p | drawn u | money | role |
+|---|---|---|---|---|
+| `demo_002_pay` | 0.35 | 0.696 | 674.00 | `ptp_honored` |
+| `demo_019_pay` | 0.45 | 0.922 | 1,298.00 | `ptp_honored` |
+| `demo_150_sub` | 0.45 | 0.923 | 225.99 | `ptp_honored` |
+
+`app/models/promise.py` permits `promised -> honored` **only when a verification
+with outcome `recovered` exists** — a constraint enforced by type, not by comment.
+The dataset ratifies 4 honored promises at checkpoint 6. The draw left 3 of those 4
+events not-recovered, so without this override 3 of the 4 honored promises would
+have been unreachable and checkpoint 6 would have had to either fabricate a
+verification or quietly reduce its ratified counts.
+
+This was caught before checkpoint 5 ran and ratified as an explicit override rather
+than absorbed silently. **10/28 = 35.7% is the pure draw; 13/28 = 46.4% is what is
+reported.** The override is 3 outcomes out of 25 and is listed above by name so the
+delta is auditable rather than merely disclosed. Every other outcome is the
+untouched draw — including `demo_035_pay` (p=0.65, u=0.676, 3,892.00), a near miss
+that was left as cancelled rather than nudged.
+
+### The honesty labelling — what is real and what is not
+
+| tier | count | what is real |
+|---|---|---|
+| `genuine` | **0** | — |
+| `real_state_simulated_delivery` | **8** | the cancellation happened on Razorpay; the webhook entity is the real post-cancel object, fetched back. Only the delivery is ours. |
+| `simulated` | **17** | the entity is Razorpay's own, fetched live; `status` and either `amount_paid` or `expired_at` are overridden. |
+
+**No payment in this dataset was genuinely completed.** The attempt was made and is
+recorded: `demo_001_pay` → `plink_TUjgTBC2eIZVTa`, whose `short_url` returns
+`HTTP 200, text/html, 6,927 bytes` — an interactive browser checkout requiring card
+entry. The link's status was re-read after the attempt and was still `created`.
+Razorpay exposes no server-side endpoint that pays a payment link. Therefore **all
+22,105.14 of reported recovered money is simulated**, and the dashboard figure
+should be presented as such.
+
+Delivery is ours in all 25 cases because the tunnel Razorpay would post to is not
+running. **If that tunnel is restarted, Razorpay's queued retries for the 8 real
+cancellations may deliver a second time**, producing a duplicate row per cancelled
+link with the same outcome. Dedup is on `razorpay_event_id`, and Razorpay's real
+event ids differ from the synthetic ones used here (`evt_s8cancel_*`,
+`evt_s8paid_*`, `evt_s8expired_*`), so dedup will not catch them.
+
+### Final state
+
+| | value |
+|---|---|
+| verifications total | 42 — 25 demo + 17 Stage 6 fixture, untouched |
+| demo outcomes | 13 `recovered`, 8 `cancelled`, 4 `expired` |
+| distinct demo events / event ids / link ids | 25 / 25 / 25 |
+| amount mismatches | 0 |
+| money recovered | **22,105.14** |
+| executed-cohort recovery rate | **13/28 = 46.4%** (supersedes ~35%) |
+| demo event statuses after reconcile | 13 `recovered`, 12 `recovery_failed` |
+| demo executions | 28, all `completed`, unchanged |
+| payment links created by checkpoint 5 | **0** — account read 26 before and 26 after |
+
+3 executions (`demo_157_sub`, `demo_172_rcv`, `demo_173_rcv`) are templated contacts
+with no payment link and are therefore unverifiable by webhook. They stay outside
+the 25 and outside both recovery rates' numerators; they are in the 28 denominator.
+
+Verified by `scripts/s8_verify.py` (15 checks, 0 failures) and independently by raw
+`pymongo` with no `app/` imports. Both agree on every figure above.
+
+### How to reverse this
+
+`db.verifications.delete_many({"event_id": {"$regex": "^demo_"}})` removes the 25
+records; the Stage 6 fixture 17 do not match that filter. The event `status`
+transitions would need reverting separately. What cannot be reversed is the gateway
+side: **the 8 cancellations are permanent** — a cancelled Razorpay link cannot be
+un-cancelled, and cancelling never returned its lifetime slot either way. Re-running
+`scripts/s8_verify.py` after a delete reproduces the same 25 outcomes exactly,
+because the draw is seeded by event id and the override list is a literal.
+
+---
+
+## 2026-08-27 — 4 verification records deleted and re-delivered in the correct order, so a promise could precede the payment that settles it
+
+### What was wrong
+
+Checkpoint 5 (verification) ran before checkpoint 6 (promise-to-pay). In reality the
+order is the other way round: a customer commits to pay, and *then* the money
+arrives. Running them backwards made the four `ptp_honored` events
+(`demo_002_pay`, `demo_019_pay`, `demo_108_chk`, `demo_150_sub`) reach status
+`recovered` before any promise existed against them.
+
+`app/ptp/store.py:NON_PROMISABLE_STATUSES` is `TERMINAL_EVENT_STATUSES`, so
+`POST /promises` refuses a terminal event with 422 `EventSettled` — "you cannot
+promise to pay money that has already arrived". That guard is correct. With it in
+force and the payments already recorded, **the `honored` state was unreachable for
+every event in the dataset**: honoring requires a `recovered` verification, and any
+event that has one is terminal.
+
+This is a sequencing error in Stage 8's own checkpoint order, not a pipeline defect.
+No `app/` code was changed.
+
+### What was done
+
+For each of the four events, in this order:
+
+1. the verification record was archived verbatim to
+   `.s8_archive/verifications_resequenced_20260827T102709Z.json` (4 documents,
+   2,302 bytes), read back, and only then deleted;
+2. the event's status was returned to `at_risk` by a raw Mongo `$set`;
+3. `POST /promises` recorded the commitment, moving the event to
+   `awaiting_promise` through the ordinary guarded transition;
+4. the **same** paid webhook was re-delivered, reusing the **same
+   `razorpay_event_id`**, writing the verification back and moving the event
+   `awaiting_promise -> recovered` — a transition the status table already permits;
+5. `POST /promises/{event_id}/check` found the payment and honored the promise.
+
+The raw `$set` in step 2 is the only unguarded write, and it is deliberate:
+`transition_event_status` cannot move an event out of `recovered` because that state
+is terminal by declaration, which is right — money does not un-arrive. What is being
+corrected is the order two checkpoints ran in, not a business fact.
+
+### What changed in the data, and what did not
+
+| | before | after |
+|---|---|---|
+| verifications total | 42 | **42** |
+| demo verifications | 25 | **25** |
+| demo outcomes | 13 recovered, 8 cancelled, 4 expired | **identical** |
+| money recovered | 22,105.14 | **22,105.14** |
+| `razorpay_event_id` values | 25 distinct | **the same 25** |
+| `verified_at` on 4 records | ~10:00 | **~10:27, after the promise** |
+
+Nothing else moved. The `_id` of those four verification documents changed, because
+they are new documents; the archive holds the originals if the old ids are ever
+needed.
+
+### The alternative that was rejected
+
+Revert the status, record the promise while the money was demonstrably already in,
+then set the status back to `recovered`. This is fewer writes and touches no
+verification — and it was rejected, because it does not re-order anything. It just
+defeats `assert_event_promisable`, producing exactly the record that guard exists to
+prevent: a commitment to pay money the system had already confirmed receiving.
+Circumventing a guardrail to make a demo number appear is worse than deleting and
+rewriting a record whose content is unchanged.
+
+### A related decision: the 3 chased events were not pre-authorized
+
+Checkpoint 6's scope said to authorize `demo_174_rcv`, `demo_175_rcv`,
+`demo_176_rcv` through the ordinary gate. Doing that as a separate
+`POST /authorize/{event_id}` call **would have made all three unchaseable**.
+`app/policy/store.py:prior_authorized_contacts` counts an authorized contact verdict
+as a reservation even when nothing has executed against it, anchoring the cooldown at
+`evaluated_at`. A verdict minted now would put a fresh 24h cooldown on each event, and
+the follow-up moments later would be blocked — yielding 5 suppressed promises and 0
+chased, leaving `broken -> reevaluating` dead in the demo.
+
+So the authorization for those three is the one `app/ptp/service.py:send_follow_up`
+performs, which calls `authorize_event` — the same function `POST /authorize/{event_id}`
+is, not a reimplementation. The gate ran on the ordinary code path and wrote an
+ordinary appended verdict (`v1`, `authorized`, reason `ok`) for each. This is the only
+sequence in which both the 3 chased and the 2 suppressed records are reachable.
+
+### How to reverse this
+
+`insertMany` the archived documents restores the original four verifications,
+including their `_id`s; the four written in their place are identifiable by
+`event_id` plus a `verified_at` later than 10:27 UTC. The eleven promises are
+`db.promises.delete_many({"event_id": {"$regex": "^demo_"}})` — the 9 Stage 6
+fixture promises do not match. The 3 follow-up executions and the 5 verdicts written
+by the gate during this checkpoint are ordinary pipeline records and would need
+clearing the same way checkpoint 4's were, via `scripts/s8_supersede.py`.
+
+---
+
+## 2026-08-27 — ratified figures, NOT a correction to data: the headline rate is 1.35%, the executed-cohort rate is 39.53%, and `~2.4%` was never a measurement
+
+No document was written, edited or deleted for this entry, and no code in `app/` was
+touched. Two figures that had been quoted in earlier entries and in Stage 8 script
+output were ratified against the full 305-event dataset after checkpoint 7, and this
+entry records what they are, where the superseded ones came from, and why one of them
+was never reproducible.
+
+### The two reported figures, as ratified
+
+| figure | value | numerator / denominator |
+|---|---|---|
+| headline recovery rate | **1.35%** | 29,605.14 recovered / 2,187,218.02 at risk, all 305 events |
+| executed-cohort recovery rate | **39.53%** | 17 recovered / 43 link-producing executions, all 305 events |
+
+Both are measured, not forecast. Both were independently reproduced from raw
+`pymongo` with no `app.metrics` imports at checkpoint 7 (104 checks, 0 failures).
+**They remain two separate reported numbers and are not reconciled into one**, per the
+standing instruction: the headline divides real recoveries by the whole portfolio, the
+cohort rate divides them by the executions that were actually actioned.
+
+### `~2.4%` was a pre-execution forecast, and it is arithmetically unreachable
+
+The figure originates in `scripts/s8_dryrun.py`, section 9 ("FORECAST DASHBOARD
+IMPACT"). Its numerator is `expected_recovered` — the sum of `amount x
+recovery_probability` over the link-carrying executions the batch *intended* to
+create — plus the 7,500.00 that was already real. **No money in that numerator had
+moved.** The script has now been amended to say so on the same line it prints the
+number, so it cannot be lifted out of that output and quoted as a measurement again.
+
+It never reproduced in actual data at any point, on any cohort:
+
+| cohort | events | at risk | recovered | rate |
+|---|---|---|---|---|
+| earlier fixture data | 105 | 744,127.75 | 7,500.00 | 1.01% |
+| Stage 8 demo batch | 200 | 1,443,090.27 | 22,105.14 | 1.53% |
+| **all** | **305** | **2,187,218.02** | **29,605.14** | **1.35%** |
+
+This is stronger than "not observed". The combined rate is a money-weighted mixture
+of the two cohorts, so it cannot exceed the higher component rate of 1.53%. **No
+partition of this dataset yields 2.4%**, and no future execution of the existing plan
+could have produced it either — the forecast was built over a 56-event execution plan
+that the Razorpay test account's 30-link lifetime ceiling later forced down to 28.
+Every reference to `~2.4%` is superseded by **1.35%**, or where a qualifier helps,
+"1.35% at the current build's full dataset".
+
+### Why 39.53% is the primary executed-cohort figure, and not the other three
+
+Four readings are defensible, and they were enumerated rather than one being picked
+silently. All four are measured; they differ only in denominator:
+
+| reading | value | denominator |
+|---|---|---|
+| **all events, link-producing executions only** | **17 / 43 = 39.53%** | executions that created a Razorpay artifact |
+| all events, every execution | 17 / 60 = 28.33% | every completed execution, contacts included |
+| demo cohort, link-producing only | 13 / 25 = 52.00% | as above, Stage 8 demo events only |
+| demo cohort, every execution | 13 / 31 = 41.94% | as above, Stage 8 demo events only |
+
+39.53% is ratified as the primary reported figure because it is the only
+apples-to-apples one across the whole dataset. A contact-type intervention
+(`reminder`, `escalating_reminder_sequence`, `manual_escalation`) produces no payment
+link, so **no webhook can ever report a recovery against it** — its recovery rate is
+structurally zero rather than measured, which is already flagged per row by
+`verifiable: false` on `GET /metrics/by-intervention`. Leaving those 17 executions in
+the denominator does not make the number more conservative, it makes it
+uninterpretable: it mixes interventions that could fail with interventions that
+cannot succeed.
+
+### What happens to 46.4% and ~35%
+
+**46.4% (13 of 28) may be quoted only as "the ratified demo cohort", and is not the
+headline.** It was correct when ratified at checkpoint 5 and it has since drifted for
+a benign reason worth recording: checkpoint 6 wrote 3 additional follow-up executions
+against demo events, so the same 13 recoveries now sit over 31 demo executions rather
+than 28 — 41.94%. The 46.4% denominator is a snapshot of a cohort that has grown, not
+a figure that was wrong.
+
+**~35% is superseded twice over and should not be quoted at all.** The 2026-08-27
+checkpoint-5 entry above already superseded it with 46.4%; 46.4% is now itself demoted
+to an aside.
+
+### Corresponding update to the 2026-08-26 open finding
+
+The entry "eleven recovered verification records describe four payments" is now
+numerically historical. At 305-event scale the same phenomenon reads **24 recovered
+verification records describing 17 distinct payments**, with 7 records ignored as
+duplicates; the literal sum would be 44,605.14 against a deduped 29,605.14. The two
+duplicate groups are unchanged in kind: `exe_S5ADV_20260825T045458_HONEST` (n=6) and
+`exe_S5_20260825T042248_DRETRY` (n=3), with every amount internally consistent inside
+each group, so which record survives dedup is immaterial to the total. The dedup rule
+in `app/metrics/reader.py:distinct_recoveries` is unchanged and correct; only the
+example counts in its docstring are stale, and they were left in place because Stage 8
+is under an explicit instruction not to modify `app/`.
+
+### What was changed by this entry
+
+Documentation and Stage 8 tooling only:
+
+| file | change |
+|---|---|
+| `scripts/s8_verify.py` | module docstring and the override output now state that 13/28 is the demo cohort, not the headline, and name 39.53% as the whole-dataset figure |
+| `scripts/s8_dryrun.py` | the forecast headline it prints is now labelled as a forecast on the same line, with the measured 1.35% stated beside it |
+| `docs/data-corrections.md` | this entry |
+
+**There is no `README.md` in this repository yet, and no pitch-material file.** The
+instruction to replace `~2.4%` "in the README and any pitch material" therefore has no
+target to edit. The requirement carries forward to first authoring instead: the README
+must state **1.35%** as the headline recovery rate and **39.53%** as the executed-cohort
+rate, keep them as two separate numbers, and must not quote `~2.4%` or `~35%` at all.
+It must also carry checkpoint 5's disclosure that **no payment in this dataset was
+genuinely completed** — all recovered money is simulated on real Razorpay link objects.
+
+### How to reverse this
+
+Revert the two script edits; nothing else was touched. No database document, index or
+collection was read or written in producing these figures beyond the read-only
+`GET /metrics/*` calls, which were confirmed byte-for-byte non-mutating at checkpoint 7
+by SHA-256 fingerprinting all 8 collections before and after.

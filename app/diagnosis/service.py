@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 
+from app.config import get_settings
 from app.diagnosis import gemini, rules
 from app.models import (
     ALLOWED_ROOT_CAUSES,
@@ -56,8 +57,14 @@ def _finalise(
     confidence: float,
     evidence: list[str],
     method: DiagnosisMethod,
-) -> tuple[Diagnosis, DiagnosisMethod]:
-    """Assemble a validated `Diagnosis` from a classification."""
+    llm_model: str | None = None,
+) -> tuple[Diagnosis, DiagnosisMethod, str | None]:
+    """Assemble a validated `Diagnosis` from a classification.
+
+    `llm_model` is provenance, carried beside the diagnosis rather than inside it:
+    which model answered is a fact about how the record was produced, not part of
+    the explanation itself, so `Diagnosis` stays free of it.
+    """
     diagnosis = Diagnosis(
         event_id=event.event_id,
         surface=event.surface,
@@ -70,12 +77,12 @@ def _finalise(
         recoverable=is_recoverable(root_cause),
         # diagnosed_at intentionally left to its default_factory: system clock only.
     )
-    return diagnosis, method
+    return diagnosis, method, llm_model
 
 
 def _fallback(
-    event: RevenueEvent, reason: str
-) -> tuple[Diagnosis, DiagnosisMethod]:
+    event: RevenueEvent, reason: str, llm_model: str | None = None
+) -> tuple[Diagnosis, DiagnosisMethod, str | None]:
     """Build the safe default diagnosis: unknown cause, low confidence."""
     return _finalise(
         event=event,
@@ -83,12 +90,13 @@ def _fallback(
         confidence=FALLBACK_CONFIDENCE,
         evidence=[reason],
         method="fallback",
+        llm_model=llm_model,
     )
 
 
 async def diagnose(
     event: RevenueEvent, prior_event_count: int = 0
-) -> tuple[Diagnosis, DiagnosisMethod]:
+) -> tuple[Diagnosis, DiagnosisMethod, str | None]:
     """Diagnose one event.
 
     Args:
@@ -97,7 +105,10 @@ async def diagnose(
             supporting evidence.
 
     Returns:
-        The diagnosis, and which path produced it.
+        The diagnosis, which path produced it, and — when a model was called — the
+        model identifier that produced it. `get_settings` is `@lru_cache`d and the
+        config is immutable at runtime, so the name read here is the same object
+        `propose_diagnosis` read when it made the call, not a second guess at it.
     """
     match = rules.classify(event, prior_event_count=prior_event_count)
 
@@ -114,6 +125,8 @@ async def diagnose(
             confidence=match.confidence,
             evidence=list(match.evidence),
             method="rules",
+            # No model was called, so there is no model to name.
+            llm_model=None,
         )
 
     if not gemini.is_configured():
@@ -129,8 +142,11 @@ async def diagnose(
                 confidence=match.confidence,
                 evidence=[*match.evidence, "low-confidence rules match, LLM unavailable"],
                 method="fallback",
+                llm_model=None,
             )
         return _fallback(event, "no rule matched and LLM is not configured")
+
+    model_name = get_settings().gemini_model
 
     try:
         proposal, raw_text = await gemini.propose_diagnosis(
@@ -142,7 +158,11 @@ async def diagnose(
         )
     except gemini.GeminiUnavailable as exc:
         logger.warning("Gemini unavailable for %s: %s", event.event_id, exc)
-        return _fallback(event, f"LLM unavailable: {type(exc).__name__}")
+        # A call WAS attempted here, so the model is named: knowing which model was
+        # unreachable is the useful part of a fallback record.
+        return _fallback(
+            event, f"LLM unavailable: {type(exc).__name__}", llm_model=model_name
+        )
 
     allowed = ALLOWED_ROOT_CAUSES[event.surface]
     candidate = normalise_root_cause(proposal.root_cause)
@@ -176,6 +196,8 @@ async def diagnose(
                 *proposal.evidence[: 2],
             ],
             method="fallback",
+            # The model did answer — it answered badly. Naming it is the point.
+            llm_model=model_name,
         )
 
     confidence = min(proposal.confidence, LLM_CONFIDENCE_CEILING)
@@ -198,4 +220,5 @@ async def diagnose(
         confidence=confidence,
         evidence=evidence,
         method="llm",
+        llm_model=model_name,
     )

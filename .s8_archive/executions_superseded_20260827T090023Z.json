@@ -1,0 +1,53 @@
+{
+  "archived_at": "20260827T090023Z",
+  "reason": "Refused by a Razorpay test-mode BURST rate limit, not the lifetime ceiling: the account had 25 of 30 slots free when these were refused, and a create succeeded again 87 seconds later. Superseded so the paced re-run can retry these verdicts, which a stored record would otherwise replay as 200.",
+  "collection": "executions",
+  "count": 3,
+  "documents": [
+    {
+      "_id": "6a8ffbd41cbbe8161ee84687",
+      "event_id": "demo_007_pay",
+      "policy_verdict_id": "6a8eb3a3b7a32de75c270dc4",
+      "policy_verdict_version": 1,
+      "intervention": "delayed_retry",
+      "action_type": "retry_simulated",
+      "razorpay_payment_link_id": null,
+      "razorpay_payment_link_url": null,
+      "contact_channel": null,
+      "contact_message_summary": null,
+      "executed_at": "2026-08-27 08:56:51.730000",
+      "status": "failed",
+      "failure_reason": "Razorpay returned HTTP 429 \u2014 BAD_REQUEST_ERROR: Too many requests"
+    },
+    {
+      "_id": "6a8ffbd51cbbe8161ee84688",
+      "event_id": "demo_008_pay",
+      "policy_verdict_id": "6a8eb3a3b7a32de75c270dc5",
+      "policy_verdict_version": 1,
+      "intervention": "payment_method_update_link",
+      "action_type": "payment_link_generated",
+      "razorpay_payment_link_id": null,
+      "razorpay_payment_link_url": null,
+      "contact_channel": null,
+      "contact_message_summary": null,
+      "executed_at": "2026-08-27 08:56:53.246000",
+      "status": "failed",
+      "failure_reason": "Razorpay returned HTTP 429 \u2014 BAD_REQUEST_ERROR: Too many requests"
+    },
+    {
+      "_id": "6a8ffbd71cbbe8161ee84689",
+      "event_id": "demo_010_pay",
+      "policy_verdict_id": "6a8eb3a4b7a32de75c270dc7",
+      "policy_verdict_version": 1,
+      "intervention": "delayed_retry",
+      "action_type": "retry_simulated",
+      "razorpay_payment_link_id": null,
+      "razorpay_payment_link_url": null,
+      "contact_channel": null,
+      "contact_message_summary": null,
+      "executed_at": "2026-08-27 08:56:54.972000",
+      "status": "failed",
+      "failure_reason": "Razorpay returned HTTP 429 \u2014 BAD_REQUEST_ERROR: Too many requests"
+    }
+  ]
+}
