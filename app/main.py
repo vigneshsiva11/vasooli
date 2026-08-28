@@ -23,6 +23,7 @@ from app.diagnosis import ensure_indexes as ensure_diagnosis_indexes
 from app.execution import ensure_indexes as ensure_execution_indexes
 from app.ingestion import ensure_indexes as ensure_event_indexes
 from app.policy import ensure_indexes as ensure_policy_indexes
+from app.ptp import ensure_extraction_indexes
 from app.ptp import ensure_indexes as ensure_promise_indexes
 from app.routes import (
     decisions,
@@ -63,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await ensure_execution_indexes()
             await ensure_verification_indexes()
             await ensure_promise_indexes()
+            # Stage 10. Its own collection, and none of its indexes is unique — see
+            # `app/ptp/extraction_store.py` for why an extraction attempt is not a
+            # fact that can only be true once.
+            await ensure_extraction_indexes()
         except Exception:  # noqa: BLE001 - reported separately from connection failure
             logger.exception(
                 "Failed to ensure MongoDB indexes; uniqueness is NOT enforced"

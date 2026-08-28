@@ -317,10 +317,37 @@ class PromiseToPayDocument(PromiseToPay):
 class PromiseRequest(BaseModel):
     """The body of `POST /promises`.
 
-    Three fields, taken literally. No free text and no Gemini: a promise is
-    structured data the merchant already has after the conversation, and parsing
-    "next Tuesday-ish" into a date with an LLM would put a model in the position of
-    deciding when money is owed.
+    Three fields, taken literally. No free text and no Gemini reach this model: a
+    promise recorded here is structured data the merchant already has after the
+    conversation.
+
+    THIS MODEL IS ALSO WHAT STAGE 10 BUILDS, and the objection that used to be
+    written here deserves an answer rather than a deletion. It read: parsing "next
+    Tuesday-ish" into a date with an LLM would put a model in the position of
+    deciding when money is owed. That is half true, and the half that is true was the
+    right thing to worry about.
+
+    What is true: an extracted date does have a consequence. It decides when a
+    promise breaks, and therefore when a follow-up is *considered*. A model that
+    misreads "Friday" moves that moment.
+
+    What is not true: that this amounts to deciding what is owed, or what happens
+    next. `POST /promises/from-text` builds one of these and hands it to the same
+    `create_promise` this endpoint calls — so an extracted promise is subject to
+    every rule a typed one is. The amount cannot exceed what the event says is at
+    risk. The date cannot precede the message or fall beyond a bounded horizon. A
+    commitment the model cannot defend produces no promise at all. And the follow-up
+    a broken promise might trigger still goes through `authorize_event` and still
+    requires an `UnpaidConfirmation`, so the opt-out, the contact cap and the
+    cooldown all still apply.
+
+    The worst outcome of a wrong extraction is therefore a contact at the wrong
+    *time* — not an unauthorized contact, not a different amount of money moving, and
+    not a promise marked `honored` without a verification behind it. That is a real
+    cost and it is bounded; the original blanket refusal was cheaper but it also meant
+    a merchant had to transcribe every message by hand. See
+    `app/models/promise_extraction.py` for the bounds and
+    `app/ptp/extraction.py` for the path.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -335,7 +362,10 @@ class PromiseRequest(BaseModel):
             "Date committed to, ISO-8601. A past date is accepted: promises are "
             "recorded by a human after a conversation, sometimes days later, and "
             "refusing to record one that has already lapsed would mean the only "
-            "promises the system knows about are the ones nobody had to chase."
+            "promises the system knows about are the ones nobody had to chase. Stage "
+            "10 relies on this too — a date resolved against an old message can be "
+            "future relative to that message and past relative to today, and both "
+            "readings are correct."
         ),
     )
 

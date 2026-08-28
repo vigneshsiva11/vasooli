@@ -1,0 +1,349 @@
+{
+  "archived_at": "2026-08-28T09:45:30.077556+00:00",
+  "what": "the seven promises created by Stage 10's verification run",
+  "why": "Created by Stage 10's verification run, not by any business activity. Four were extracted from free-text messages I wrote to exercise the extractor; three are controls or their structured counterparts. Every one was built to hit an edge case rather than to represent a customer: demo_188_rcv, demo_195_rcv, ptp_..._A and ptp_..._B were dated 2026-07-10 from a deliberately stale reference clock, so all four were already overdue the moment they existed. That is the point of the test and the reason they cannot stay: they moved honor_rate from 72.73% to 61.54% by adding breakage that no customer caused. None of the seven is 'honored', so removing them cannot flatter the metric by discarding a failure — it removes 2 'broken' and 2 'reevaluating' that were overdue by construction, plus 3 still open.",
+  "restore_notes": "Serialized to match .s8_archive/.s9_archive: `_id` values and timestamps are plain strings. To restore, re-cast every `_id` with bson.ObjectId and every `created_at`/`resolved_at` with datetime.fromisoformat before inserting. `promised_date` is stored as a plain 'YYYY-MM-DD' string in MongoDB and needs no conversion.",
+  "honor_rate_before": 61.54,
+  "honor_rate_after": 72.73,
+  "promise_states_removed": {
+    "promised": 3,
+    "broken": 2,
+    "reevaluating": 2
+  },
+  "removed": [
+    {
+      "reason_created": "L1 — extracted from 'I'll pay by Friday' on a 2026-08-25 clock",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a915253bf4f215ecee0faa2",
+        "event_id": "demo_186_rcv",
+        "promised_amount": 60364.0,
+        "promised_date": "2026-08-28",
+        "state": "promised",
+        "created_at": "2026-08-28T09:18:11.483000+00:00",
+        "resolved_at": null,
+        "follow_up_sent": false
+      }
+    },
+    {
+      "reason_created": "L2 — the same text on a 2026-07-06 clock, overdue on creation",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a915258bf4f215ecee0faa4",
+        "event_id": "demo_188_rcv",
+        "promised_amount": 54399.0,
+        "promised_date": "2026-07-10",
+        "state": "broken",
+        "created_at": "2026-08-28T09:18:15.898000+00:00",
+        "resolved_at": "2026-08-28T09:24:07.293000+00:00",
+        "follow_up_sent": false
+      }
+    },
+    {
+      "reason_created": "L3 — extracted with an explicit amount",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a91525cbf4f215ecee0faa6",
+        "event_id": "demo_191_rcv",
+        "promised_amount": 5000.0,
+        "promised_date": "2026-09-20",
+        "state": "promised",
+        "created_at": "2026-08-28T09:18:20.491000+00:00",
+        "resolved_at": null,
+        "follow_up_sent": false
+      }
+    },
+    {
+      "reason_created": "L4 — extracted from a relative date ('next Monday')",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a915262bf4f215ecee0faa8",
+        "event_id": "demo_193_rcv",
+        "promised_amount": 110754.5,
+        "promised_date": "2026-08-31",
+        "state": "promised",
+        "created_at": "2026-08-28T09:18:26.400000+00:00",
+        "resolved_at": null,
+        "follow_up_sent": false
+      }
+    },
+    {
+      "reason_created": "structured control for the suppressed-path parity pair (demo_188_rcv)",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a9153b6bf4f215ecee0faad",
+        "event_id": "demo_195_rcv",
+        "promised_amount": 115094.05,
+        "promised_date": "2026-07-10",
+        "state": "broken",
+        "created_at": "2026-08-28T09:24:06.385000+00:00",
+        "resolved_at": "2026-08-28T09:24:08.245000+00:00",
+        "follow_up_sent": false
+      }
+    },
+    {
+      "reason_created": "extracted half of the executed-path parity pair",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a915489bf4f215ecee0fab2",
+        "event_id": "ptp_20260825T111455_A",
+        "promised_amount": 900.0,
+        "promised_date": "2026-07-10",
+        "state": "reevaluating",
+        "created_at": "2026-08-28T09:27:37.401000+00:00",
+        "resolved_at": "2026-08-28T09:27:38.999000+00:00",
+        "follow_up_sent": true
+      }
+    },
+    {
+      "reason_created": "structured control half of the executed-path parity pair",
+      "event_status_before_removal": "awaiting_promise",
+      "event_status_restored_to": "at_risk",
+      "promise": {
+        "_id": "6a915489bf4f215ecee0fab3",
+        "event_id": "ptp_20260825T111455_B",
+        "promised_amount": 900.0,
+        "promised_date": "2026-07-10",
+        "state": "reevaluating",
+        "created_at": "2026-08-28T09:27:37.686000+00:00",
+        "resolved_at": "2026-08-28T09:27:40.148000+00:00",
+        "follow_up_sent": true
+      }
+    }
+  ],
+  "kept": {
+    "promise_extractions": {
+      "count": 6,
+      "linked_to_removed_promises": 5,
+      "why_kept": "These are the audit record of nine real Gemini calls, including the raw model response for each. Deleting them would destroy the evidence Stage 10 rests on, and they are not promises: they do not enter honor_rate or any other metric. The five promise_id values are left pointing at the promises in this file rather than nulled, because `PromiseExtraction.promise_id` documents a null on an accepted extraction as meaning either the linking write did not complete or creation was refused downstream. Neither is true here, so nulling would store a false statement in an audit log. The pointers resolve against this archive.",
+      "records": [
+        {
+          "_id": "6a915253bf4f215ecee0faa1",
+          "event_id": "demo_186_rcv",
+          "raw_text": "Sorry for the delay, I'll pay by Friday, just had a cash flow issue.",
+          "received_at": "2026-08-25T09:15:00+00:00",
+          "accepted": true,
+          "promise_id": "6a915253bf4f215ecee0faa2",
+          "promised_date": "2026-08-28",
+          "promised_amount": 60364.0,
+          "amount_inferred": true,
+          "confidence": 0.9,
+          "confidence_floor": 0.7,
+          "quote": "I'll pay by Friday",
+          "quote_verified": true,
+          "refusal_reason": null,
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": \"2026-08-28\",\n  \"promised_amount\": null,\n  \"confidence\": 0.9,\n  \"quote\": \"I'll pay by Friday\"\n}",
+          "extracted_at": "2026-08-28T09:18:11.153000+00:00"
+        },
+        {
+          "_id": "6a915257bf4f215ecee0faa3",
+          "event_id": "demo_188_rcv",
+          "raw_text": "Sorry for the delay, I'll pay by Friday, just had a cash flow issue.",
+          "received_at": "2026-07-06T09:15:00+00:00",
+          "accepted": true,
+          "promise_id": "6a915258bf4f215ecee0faa4",
+          "promised_date": "2026-07-10",
+          "promised_amount": 54399.0,
+          "amount_inferred": true,
+          "confidence": 0.9,
+          "confidence_floor": 0.7,
+          "quote": "I'll pay by Friday",
+          "quote_verified": true,
+          "refusal_reason": null,
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": \"2026-07-10\",\n  \"promised_amount\": null,\n  \"confidence\": 0.9,\n  \"quote\": \"I'll pay by Friday\"\n}",
+          "extracted_at": "2026-08-28T09:18:15.784000+00:00"
+        },
+        {
+          "_id": "6a91525cbf4f215ecee0faa5",
+          "event_id": "demo_191_rcv",
+          "raw_text": "I can send ₹5000 by the 20th, the rest will take longer.",
+          "received_at": "2026-08-25T09:15:00+00:00",
+          "accepted": true,
+          "promise_id": "6a91525cbf4f215ecee0faa6",
+          "promised_date": "2026-09-20",
+          "promised_amount": 5000.0,
+          "amount_inferred": false,
+          "confidence": 0.8,
+          "confidence_floor": 0.7,
+          "quote": "I can send ₹5000 by the 20th",
+          "quote_verified": true,
+          "refusal_reason": null,
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": \"2026-09-20\",\n  \"promised_amount\": 5000,\n  \"confidence\": 0.8,\n  \"quote\": \"I can send ₹5000 by the 20th\"\n}",
+          "extracted_at": "2026-08-28T09:18:20.432000+00:00"
+        },
+        {
+          "_id": "6a915262bf4f215ecee0faa7",
+          "event_id": "demo_193_rcv",
+          "raw_text": "Please give me till next Monday, I'll settle the whole thing then.",
+          "received_at": "2026-08-25T09:15:00+00:00",
+          "accepted": true,
+          "promise_id": "6a915262bf4f215ecee0faa8",
+          "promised_date": "2026-08-31",
+          "promised_amount": 110754.5,
+          "amount_inferred": true,
+          "confidence": 0.9,
+          "confidence_floor": 0.7,
+          "quote": "Please give me till next Monday, I'll settle the whole thing then.",
+          "quote_verified": true,
+          "refusal_reason": null,
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": \"2026-08-31\",\n  \"promised_amount\": null,\n  \"confidence\": 0.9,\n  \"quote\": \"Please give me till next Monday, I'll settle the whole thing then.\"\n}",
+          "extracted_at": "2026-08-28T09:18:26.329000+00:00"
+        },
+        {
+          "_id": "6a915266bf4f215ecee0faa9",
+          "event_id": "demo_195_rcv",
+          "raw_text": "I'm still thinking about it, not sure yet when I can arrange the funds.",
+          "received_at": "2026-08-25T09:15:00+00:00",
+          "accepted": false,
+          "promise_id": null,
+          "promised_date": null,
+          "promised_amount": null,
+          "amount_inferred": false,
+          "confidence": 0.0,
+          "confidence_floor": 0.7,
+          "quote": null,
+          "quote_verified": false,
+          "refusal_reason": "no_commitment_found",
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": null,\n  \"promised_amount\": null,\n  \"confidence\": 0.0,\n  \"quote\": null\n}",
+          "extracted_at": "2026-08-28T09:18:30.406000+00:00"
+        },
+        {
+          "_id": "6a915489bf4f215ecee0fab1",
+          "event_id": "ptp_20260825T111455_A",
+          "raw_text": "Sorry for the delay, I'll pay by Friday, just had a cash flow issue.",
+          "received_at": "2026-07-06T09:15:00+00:00",
+          "accepted": true,
+          "promise_id": "6a915489bf4f215ecee0fab2",
+          "promised_date": "2026-07-10",
+          "promised_amount": 900.0,
+          "amount_inferred": true,
+          "confidence": 0.9,
+          "confidence_floor": 0.7,
+          "quote": "I'll pay by Friday",
+          "quote_verified": true,
+          "refusal_reason": null,
+          "llm_model": "gemini-3.5-flash-lite",
+          "raw_response": "{\n  \"promised_date\": \"2026-07-10\",\n  \"promised_amount\": null,\n  \"confidence\": 0.9,\n  \"quote\": \"I'll pay by Friday\"\n}",
+          "extracted_at": "2026-08-28T09:27:37.337000+00:00"
+        }
+      ]
+    },
+    "executions": {
+      "count": 2,
+      "why_kept": "Two contacts genuinely were rendered and logged for the executed-parity pair, each through the policy gate, each with razorpay_payment_link_id null. An execution stands on its policy verdict and holds no reference to a promise, so neither becomes dangling. Deleting a record of a contact that was actually made would misstate the contact history the caps are counted from.",
+      "records": [
+        {
+          "_id": "6a91548abf4f215ecee0fab5",
+          "event_id": "ptp_20260825T111455_A",
+          "policy_verdict_id": "6a91548abf4f215ecee0fab4",
+          "policy_verdict_version": 1,
+          "intervention": "escalating_reminder_sequence",
+          "action_type": "contact_logged",
+          "razorpay_payment_link_id": null,
+          "razorpay_payment_link_url": null,
+          "contact_channel": "email",
+          "contact_message_summary": "escalating_reminder.step1.v1 v1 via email — Second notice — INR 900.00 outstanding",
+          "executed_at": "2026-08-28T09:27:38.818000+00:00",
+          "status": "completed",
+          "failure_reason": null
+        },
+        {
+          "_id": "6a91548cbf4f215ecee0fab7",
+          "event_id": "ptp_20260825T111455_B",
+          "policy_verdict_id": "6a91548bbf4f215ecee0fab6",
+          "policy_verdict_version": 1,
+          "intervention": "escalating_reminder_sequence",
+          "action_type": "contact_logged",
+          "razorpay_payment_link_id": null,
+          "razorpay_payment_link_url": null,
+          "contact_channel": "email",
+          "contact_message_summary": "escalating_reminder.step1.v1 v1 via email — Second notice — INR 900.00 outstanding",
+          "executed_at": "2026-08-28T09:27:39.938000+00:00",
+          "status": "completed",
+          "failure_reason": null
+        }
+      ]
+    },
+    "policy_verdicts": {
+      "count": 10,
+      "why_kept": "append-only; a verdict records a decision that was made",
+      "records": [
+        {
+          "_id": "6a8eb3ddb7a32de75c270e74",
+          "event_id": "demo_186_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a9153babf4f215ecee0fab0",
+          "event_id": "demo_188_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a9153b7bf4f215ecee0faae",
+          "event_id": "demo_188_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a8eb3ddb7a32de75c270e76",
+          "event_id": "demo_188_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a8eb3deb7a32de75c270e79",
+          "event_id": "demo_191_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a8eb3dfb7a32de75c270e7b",
+          "event_id": "demo_193_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a9153b8bf4f215ecee0faaf",
+          "event_id": "demo_195_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a8eb3e0b7a32de75c270e7d",
+          "event_id": "demo_195_rcv",
+          "verdict": "requires_manual_review",
+          "reason": "amount_never_auto"
+        },
+        {
+          "_id": "6a91548abf4f215ecee0fab4",
+          "event_id": "ptp_20260825T111455_A",
+          "verdict": "authorized",
+          "reason": "ok"
+        },
+        {
+          "_id": "6a91548bbf4f215ecee0fab6",
+          "event_id": "ptp_20260825T111455_B",
+          "verdict": "authorized",
+          "reason": "ok"
+        }
+      ]
+    },
+    "verifications": {
+      "count": 0,
+      "why_kept": "there are none — no money is involved in any of this"
+    }
+  }
+}

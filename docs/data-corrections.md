@@ -1280,3 +1280,222 @@ There is nothing to reverse — this entry documents a reversal already performe
 execution: `uniq_confirmation_id` is unique and both records carry
 `manual_conf_6a8fff171cbbe8161ee8469f`, so the insert would be refused. That collision
 is the partial unique index from Stage 9's own migration doing its job.
+
+---
+
+## 2026-08-28 — Stage 10: seven test promises removed from `promises`, and seven event statuses walked back
+
+Seven promise documents deleted from `promises`, and the seven events they belonged
+to returned from `awaiting_promise` to `at_risk`.
+
+This is not a defect in Stage 10's code and not a test-design error either. A
+verification run for a promise-creation feature has to create promises; the question
+is only whether they stay afterwards. These should not, because they were built to be
+pathological and they moved a reported metric.
+
+### What they were
+
+| event | how the promise was created | state | `promised_date` | amount | `_id` |
+|---|---|---|---|---|---|
+| `demo_186_rcv` | extracted (L1) | `promised` | 2026-08-28 | 60,364.00 | `6a915253bf4f215ecee0faa2` |
+| `demo_188_rcv` | extracted (L2) | `broken` | 2026-07-10 | 54,399.00 | `6a915258bf4f215ecee0faa4` |
+| `demo_191_rcv` | extracted (L3) | `promised` | 2026-09-20 | 5,000.00 | `6a91525cbf4f215ecee0faa6` |
+| `demo_193_rcv` | extracted (L4) | `promised` | 2026-08-31 | 110,754.50 | `6a915262bf4f215ecee0faa8` |
+| `demo_195_rcv` | structured, `POST /promises` | `broken` | 2026-07-10 | 115,094.05 | `6a9153b6bf4f215ecee0faad` |
+| `ptp_20260825T111455_A` | extracted | `reevaluating` | 2026-07-10 | 900.00 | `6a915489bf4f215ecee0fab2` |
+| `ptp_20260825T111455_B` | structured, `POST /promises` | `reevaluating` | 2026-07-10 | 900.00 | `6a915489bf4f215ecee0fab3` |
+
+**The enumeration in the request was ambiguous, and the ambiguity is worth recording,
+because resolving it wrongly would have deleted the wrong set.** The request said
+"L1-L4, plus the two executed-follow-up parity pairs" — for seven records. Read
+strictly that is six: L1-L4 is four, and there is only *one* executed-follow-up pair,
+`ptp_..._A` and `ptp_..._B`. The seventh is `demo_195_rcv`, the structured control
+from the **suppressed**-path parity run, whose partner `demo_188_rcv` is already
+counted as L2. The stated count of seven is what disambiguates it, and seven is also
+exactly how many promises Stage 10 created — so both parity runs are represented, one
+pair per branch, and nothing outside the Stage 10 run was touched.
+
+### Why they could not be left alone
+
+Every one was constructed to hit an edge case rather than to represent a customer.
+Four of the seven — `demo_188_rcv`, `demo_195_rcv`, `ptp_..._A`, `ptp_..._B` — were
+dated 2026-07-10 from a deliberately stale reference clock, so they were *already
+overdue at the moment they were created*. That is the whole point of the test: L2
+exists to prove a relative date resolves against the message's timestamp rather than
+against today, and the only way to prove it is to produce a promise that is
+retrospectively broken.
+
+Left in place they reported breakage that no customer caused:
+
+| reading | before removal | after removal |
+|---|---|---|
+| `honor_rate`, optimistic — `honored/(honored+broken)` | 61.54% | **72.73%** |
+| pessimistic — `honored/(honored+broken+reevaluating)` | 38.10% | 47.06% |
+
+**The suspicious thing about this correction, stated plainly: removing these records
+improves the metric on both readings.** That is exactly the shape of a number being
+massaged, so here is why it is not. None of the seven was `honored` — the states
+removed were 3 `promised`, 2 `broken`, 2 `reevaluating`. There was no success in the
+set to preserve, and no failure being hidden that any customer produced: the removal
+takes out two breakages manufactured with a backdated clock, two chased promises that
+were overdue by construction, and three that had not resolved either way. The seven
+documents are preserved verbatim, so the 61.54% figure remains computable by anyone
+who wants to check that claim rather than take it.
+
+### What was done
+
+1. all seven promise documents, the event status of each before and after, both
+   `honor_rate` readings, and the full set of records *not* deleted were written to
+   [`.s10_archive/promises_stage10_test_records_20260828T094526Z.json`](../.s10_archive/promises_stage10_test_records_20260828T094526Z.json)
+   (15,825 bytes) — **then read back off disk and compared field by field against what
+   was still in MongoDB, before any delete ran.** The script exits non-zero having
+   deleted nothing if that comparison fails, so the ordering is enforced by control
+   flow rather than by care;
+2. the seven were deleted one at a time by `delete_one({"_id": ...})`, each checked
+   for `deleted_count == 1`;
+3. the seven events were moved from `awaiting_promise` to `at_risk` by a raw Mongo
+   `$set`, filtered on the status still being exactly `awaiting_promise`.
+
+The script is [`scripts/s10_remove_test_promises.py`](../scripts/s10_remove_test_promises.py);
+the dependency map it was built from is
+[`scripts/s10_investigate_removal.py`](../scripts/s10_investigate_removal.py), which
+writes nothing.
+
+### Why step 3 had to be a direct write
+
+`app/models/events.py:ALLOWED_STATUS_TRANSITIONS` gives `awaiting_promise` the
+successors `{recovered, recovery_failed}` and no arc back to `at_risk`. That is
+correct for the running system — in normal operation a promise is never unmade, so
+there is no guarded path out and there should not be one. This is the same situation
+as the Stage 9 entry above, where a terminal `recovered` had to be walked back, and it
+is disclosed for the same reason: those two are the only writes in the project that
+bypass application code.
+
+Leaving the statuses alone was not an option. Seven events sitting in
+`awaiting_promise` with no promise to check is a broken state, not a neutral one:
+`POST /promises/{event_id}/check` returns 404, and `events_by_status` would report
+seven events as waiting on something that does not exist.
+
+**The predecessor status was established rather than assumed.** `recovery_failed` is
+reachable only from a `payment_link.expired` or `payment_link.cancelled` webhook
+(`app/webhooks/service.py:67-68`), which requires the event to have had a payment
+link; none of the seven ever had one. So `at_risk` was the only possible prior state.
+The aggregate then confirmed it after the fact: `at_risk` rose by exactly 7 and
+`awaiting_promise` fell by exactly 7, which could not both hold if any of the seven
+had come from anywhere else.
+
+### What was NOT deleted, and why
+
+**The six `promise_extractions` records, including the five whose `promise_id` now
+points at a deleted promise.** These are the audit record of real Gemini calls and
+hold the raw model response for each; they are what Stage 10's evidence rests on, and
+they are not promises — they enter no metric and appear in no aggregate.
+
+The five stale `promise_id` values were deliberately **not** nulled.
+`PromiseExtraction.promise_id` documents its own null as meaning one of two things:
+the linking write did not complete, or promise creation was refused downstream because
+a different amount was already promised for that date. Neither is true here — the link
+was written and the promise did exist — so nulling would store a false statement in an
+audit log in order to tidy up a pointer. Nothing in the codebase dereferences
+`promise_id`; the sparse `promise_id_sparse` index exists so a human can walk from a
+promise back to the message it came from, and for these five that walk now lands in
+the archive above rather than in the live collection.
+
+**The two `executions`.** `ptp_..._A` and `ptp_..._B` each had a follow-up genuinely
+authorized and a contact genuinely rendered and logged
+(`escalating_reminder_sequence`, `contact_logged`, `status: completed`,
+`razorpay_payment_link_id: null` on both — no Razorpay slot was consumed). An
+execution holds no reference to a promise and stands on its policy verdict, so neither
+becomes dangling. Deleting a record of a contact that was really made would misstate
+the contact history that `MAX_CONTACTS_PER_EVENT` is counted from.
+
+**All ten `policy_verdicts` on these events** — five pre-existing from the 2026-08-26
+pipeline run, and five created by the Stage 10 follow-up attempts (three
+`requires_manual_review`, on `demo_188_rcv` twice and `demo_195_rcv` once, plus two
+`authorized` for `ptp_..._A` and `ptp_..._B`). The log is append-only; a verdict
+records a decision that was in fact made.
+
+*A count correction of my own:* I reported four Stage-10-created verdicts while
+planning this removal. It is five — `demo_188_rcv` received two, one from the initial
+check and one from the idempotent re-check. The wrong figure came from a query on a
+timestamp field whose name I had guessed (`decided_at`); the real field is
+`evaluated_at`, and the guessed one returned `None` for every document.
+
+**No `verifications`.** There are none on any of the seven events, so no recovered
+money is involved anywhere in this correction.
+
+### Verification
+
+57 checks, 0 failures, in the removal script itself:
+
+- **deletion verified by `_id`, not by count.** The full set of surviving `_id` values
+  was recorded *before* the deletes and compared against the collection afterwards, so
+  "the right seven went" is established rather than "seven went" — a count match alone
+  would not rule out a swap;
+- the resulting state distribution `{honored: 8, broken: 3, promised: 3,
+  reevaluating: 6}`, 20 promises in total, matched the prediction made before anything
+  was deleted;
+- `GET /metrics/promise-to-pay` returns `honor_rate: 72.73` and `total_promises: 20`,
+  and every per-state count on the endpoint matches the raw pymongo query — the rate
+  alone could be right for the wrong reasons if two states had moved in compensating
+  directions;
+- **no money figure moved,** which is the point: `total_revenue_at_risk`
+  2,187,218.02, `total_revenue_recovered` 33,122.09, `recovery_rate` 1.51,
+  `recovery_rate_gateway_verified` 1.35, `distinct_recoveries_counted` 20,
+  `total_events` 305, `total_events_processed` 304 — all identical before and after;
+- each of the seven events reads back `at_risk` with zero promises;
+- the extraction, execution and verdict counts on those events are unchanged (6, 2,
+  10);
+- `POST /promises/demo_188_rcv/check` now returns 404 with *"has no promise to check;
+  record one with POST /promises first"* rather than half-existing, and
+  `GET /promises?event_id=demo_188_rcv` returns an empty list;
+- `GET /audit-trail/demo_188_rcv` returns 200 with `promises: 0` — it does not error
+  on an event whose promise is gone;
+- separately, all 16 GET endpoints in the OpenAPI schema return 200, and the server
+  log contains zero `ERROR` or `Traceback` lines.
+
+A further 19 checks in
+[`scripts/s10_confirm_removal.py`](../scripts/s10_confirm_removal.py) confirm the
+result from a fresh process, importing nothing from `app/metrics/` so the numbers are
+not checked against the code that produced them:
+
+- the state persisted — a new connection sees the same 20 promises, and `honor_rate`
+  recomputed from raw pymongo (72.73%) matches the endpoint field for field;
+- `at_risk` 261 / `awaiting_promise` 11, which are the pre-Stage-10 figures;
+- **every field of all 1,557 documents in all 10 collections was scanned for the seven
+  deleted `_id` values.** The only hits anywhere are the five documented
+  `promise_extractions.promise_id` links — no execution, verdict, verification, event
+  or decision names one. That is the strong form of "nothing else depends on these
+  records": found by exhaustive scan rather than by checking the places a reference was
+  expected;
+- the archive is a working restore path and not merely a file: all seven promises are
+  parsed back through `PromiseToPay` following the `restore_notes` verbatim, amounts
+  round-trip exactly, and every timestamp parses with `fromisoformat`. Nothing is
+  inserted.
+
+*A test-design error of mine, recorded because the check is part of the evidence:* the
+exhaustive sweep was first written to assert **zero** references anywhere, and it
+failed. The assertion was wrong, not the data — the five extraction links were kept
+deliberately, for the reason given above, so demanding zero contradicted the decision
+the script exists to confirm. It now asserts the meaningful claim, that those five are
+the only references in the database, and cross-checks the sweep against a targeted
+query so two independent routes agree on which five they are.
+
+### How to reverse this
+
+Re-insert the seven `promise` objects from the archive, re-casting each `_id` with
+`bson.ObjectId` and `created_at`/`resolved_at` with `datetime.fromisoformat`
+(`promised_date` is stored as a plain `YYYY-MM-DD` string and needs no conversion),
+then set each of the seven events back to `awaiting_promise`. That last step can go
+through `transition_event_status` rather than a raw write, since `at_risk ->
+awaiting_promise` is a permitted transition. `honor_rate` would return to 61.54%.
+
+### How this is prevented from recurring
+
+It is not, and it should not be — the next feature that creates promises will need to
+create promises to prove it works. What changes is that the residue is now expected and
+named: a verification run that writes to a collection feeding a reported metric should
+end by archiving and removing what it wrote, in that order, and should say which metric
+it moved and by how much. The two scripts above are the pattern for doing that, and the
+`investigate` half deliberately writes nothing, so the dependency map can be read and
+argued with before anything is destroyed.

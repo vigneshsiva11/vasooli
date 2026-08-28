@@ -19,6 +19,17 @@ changing either.
 `_MINTED_BY_THE_CHECK` is deliberately NOT re-exported. It is the capability that
 makes the token unforgeable, and a module that can import it from here can forge
 one without reaching into a private name.
+
+Stage 10 adds one more entry point at the front:
+
+    extract_promise     read a commitment out of a customer's message, then record
+                        it through `create_promise` — the same function, unchanged
+
+`evaluate_proposal` is exported because it is the pure decision function behind that
+path and the thing an adversarial suite drives directly, with no model call and no
+database. `propose_promise` is not exported: nothing outside `app/ptp/extraction.py`
+should be calling a language model, and having to reach into `app.ptp.gemini` to do
+it keeps that visible.
 """
 
 from app.models.promise import (
@@ -39,6 +50,30 @@ from app.models.promise import (
     states_that_may_become,
     today_utc,
 )
+from app.models.promise_extraction import (
+    ALLOWED_REFUSAL_REASONS,
+    CONFIDENCE_FLOOR,
+    MAX_PROMISE_HORIZON_DAYS,
+    MAX_RAW_TEXT_CHARS,
+    UNVERIFIED_QUOTE_PENALTY,
+    ExtractionOutcome,
+    LLMPromiseProposal,
+    PromiseExtraction,
+    PromiseExtractionDocument,
+    PromiseFromTextRequest,
+    PromiseFromTextResponse,
+    RefusalReason,
+    evaluate_proposal,
+    quote_appears_in,
+)
+from app.ptp.extraction import extract_promise
+from app.ptp.extraction_store import (
+    ensure_indexes as ensure_extraction_indexes,
+)
+from app.ptp.extraction_store import (
+    list_extractions,
+)
+from app.ptp.gemini import PromiseExtractionUnavailable
 from app.ptp.safety import (
     MAX_CONFIRMATION_AGE_SECONDS,
     AlreadyRecovered,
@@ -75,28 +110,41 @@ from app.ptp.store import (
 __all__ = [
     "ALLOWED_PROMISE_STATES",
     "ALLOWED_PROMISE_TRANSITIONS",
+    "ALLOWED_REFUSAL_REASONS",
     "AWAITING_PROMISE_STATUS",
     "COLLECTION_NAME",
+    "CONFIDENCE_FLOOR",
     "INITIAL_PROMISE_STATE",
     "MAX_CONFIRMATION_AGE_SECONDS",
+    "MAX_PROMISE_HORIZON_DAYS",
+    "MAX_RAW_TEXT_CHARS",
     "NON_PROMISABLE_STATUSES",
     "OPEN_PROMISE_STATE",
     "REQUIRES_FOLLOW_UP_SENT",
     "TERMINAL_PROMISE_STATES",
+    "UNVERIFIED_QUOTE_PENALTY",
     "AlreadyRecovered",
     "DuplicatePromise",
     "EventNotFound",
     "EventSettled",
+    "ExtractionOutcome",
     "FollowUpReport",
+    "LLMPromiseProposal",
     "MismatchedConfirmation",
     "PromiseCheck",
     "PromiseError",
+    "PromiseExtraction",
+    "PromiseExtractionDocument",
+    "PromiseExtractionUnavailable",
+    "PromiseFromTextRequest",
+    "PromiseFromTextResponse",
     "PromiseNotFound",
     "PromiseRequest",
     "PromiseState",
     "PromiseToPay",
     "PromiseToPayDocument",
     "PromiseTransition",
+    "RefusalReason",
     "StaleConfirmation",
     "UnmintedConfirmation",
     "UnpaidConfirmation",
@@ -108,10 +156,15 @@ __all__ = [
     "create_promise",
     "deadline_passed",
     "decode_date",
+    "ensure_extraction_indexes",
     "ensure_indexes",
+    "evaluate_proposal",
+    "extract_promise",
     "find_latest",
+    "list_extractions",
     "list_promises",
     "promise_transition_allowed",
+    "quote_appears_in",
     "send_follow_up",
     "states_that_may_become",
     "today_utc",
