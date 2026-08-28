@@ -15,7 +15,17 @@ Three things this router deliberately does not offer:
   re-authorizing — `POST /authorize/{event_id}` — which is a policy decision and
   belongs behind the policy gate, not behind a `?force=true`.
 
-Nothing here reports whether money came back. That is Stage 6.
+Nothing here reports whether money came back through a payment link. That is Stage 6,
+and it arrives as a signed Razorpay webhook rather than as a call to this router.
+
+One endpoint here does record a recovery: `POST /executions/{execution_id}/confirm-payment`,
+Stage 9's receivable path. It exists because a `contact_logged` execution creates no
+Razorpay artifact, so no webhook can ever report on it, and without this the only
+interventions a receivables merchant uses would read 0% recovery forever. It is
+confined to contact-type executions — a link-producing execution is refused, because
+a manual override on a channel that has real verification available is the same as
+not having real verification — and everything it writes is labelled
+`source: "manual_confirmation"` so asserted money is never totalled as verified money.
 """
 
 from __future__ import annotations
@@ -26,7 +36,9 @@ from app import execution as execution_stage
 from app import ingestion
 from app import policy as policy_stage
 from app.models.execution import ALLOWED_ACTION_TYPES, ExecutionRecordDocument
+from app.models.verification import ManualConfirmationAck, ManualPaymentConfirmation
 from app.routes.events import database_ready
+from app.webhooks import manual, store as verification_store
 
 router = APIRouter(
     tags=["execution"],
@@ -118,6 +130,80 @@ async def execute_event(event_id: str, response: Response) -> ExecutionRecordDoc
     if not outcome.created:
         response.status_code = status.HTTP_200_OK
     return outcome.record
+
+
+@router.post(
+    "/executions/{execution_id}/confirm-payment",
+    response_model=ManualConfirmationAck,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record that a contact-type recovery was paid (Stage 9, manual source)",
+)
+async def confirm_execution_payment(
+    execution_id: str,
+    request: ManualPaymentConfirmation,
+    response: Response,
+) -> ManualConfirmationAck:
+    """Confirm, as the merchant, that money arrived after a logged contact.
+
+    The receivable half of verification. A reminder, an escalating sequence and a
+    manual escalation all execute as `contact_logged` and produce no Razorpay
+    artifact, so no webhook will ever arrive about them; this is how their outcome
+    gets onto the record. What it is not is a shortcut around the gateway — see the
+    409 below.
+
+    The request body carries the amount and, optionally, when it arrived. It cannot
+    carry the event, the expected amount, the outcome or the source: the event comes
+    from the execution named in the path, the expected amount is derived from that
+    execution's own authorizing verdict, and the other two are fixed. `extra="forbid"`
+    rejects any attempt to supply them.
+
+    Returns 201 when this call wrote the confirmation and 200 when it returned one an
+    earlier call had already written — the same reading as `POST /execute/{event_id}`:
+    a 200 means *nothing happened this time*.
+
+    Raises:
+        HTTPException 404: no execution with that id.
+        HTTPException 409: refused, and the detail says which of four ways. The
+            execution is a link action, so it has a real verification channel and
+            must use it; or it is not `completed`, so there is nothing to confirm the
+            outcome of; or this event's money is already recorded as recovered, which
+            is terminal in the same way promise creation is; or the write-time
+            referential guard found the execution and the record disagree.
+        HTTPException 500: the execution's authorizing verdict or decision has been
+            deleted, so no expected amount exists to compare the payment against.
+            Not defaulted around — an unchecked mismatch is worse than a refusal.
+    """
+    try:
+        ack = await manual.confirm_payment(execution_id, request)
+    except manual.ExecutionNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except manual.EventAlreadyRecovered as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except verification_store.NotManuallyConfirmable as exc:
+        # The allowlist refused: a link action, or an execution that never completed.
+        # 409 rather than 422 — the body was fine, the state of the named execution is
+        # what makes the request impossible.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except verification_store.VerificationReferenceError as exc:
+        # Any other write-time referential refusal. Same code, and it is deliberately
+        # last so the more specific subclass above is not swallowed by it.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except manual.ExpectedAmountUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+
+    if not ack.created:
+        response.status_code = status.HTTP_200_OK
+    return ack
 
 
 @router.get(

@@ -29,7 +29,11 @@ from app.models.execution import ExecutionRecordDocument
 from app.models.metrics import AuditTrail, FingerprintUse, TimelineEntry
 from app.models.policy import UNATTESTED_FINGERPRINT_SOURCES, PolicyVerdictRecord
 from app.models.promise import PromiseToPayDocument
-from app.models.verification import RECOVERED_OUTCOME, VerificationRecordDocument
+from app.models.verification import (
+    MANUAL_SOURCE,
+    RECOVERED_OUTCOME,
+    verification_document,
+)
 
 
 class EventNotFound(LookupError):
@@ -66,9 +70,7 @@ def assemble(snapshot: Snapshot, event_id: str) -> AuditTrail:
     decisions = [DecisionRecord.from_document(d) for d in snapshot.decisions]
     verdicts = [PolicyVerdictRecord.from_document(d) for d in snapshot.verdicts]
     executions = [ExecutionRecordDocument.from_document(d) for d in snapshot.executions]
-    verifications = [
-        VerificationRecordDocument.from_document(d) for d in snapshot.verifications
-    ]
+    verifications = [verification_document(d) for d in snapshot.verifications]
     promises = [PromiseToPayDocument.from_document(d) for d in snapshot.promises]
 
     # --- the merged timeline -------------------------------------------------
@@ -150,17 +152,33 @@ def assemble(snapshot: Snapshot, event_id: str) -> AuditTrail:
             )
         )
     for verification in verifications:
+        # The two verification sources render differently and are labelled with
+        # different stages, because an auditor reading this trail has to be able to
+        # tell Razorpay's signed word from the merchant's assertion without opening
+        # the full record. The branch is on `source`, which the discriminated union
+        # guarantees is present and is the only field that distinguishes them.
+        if verification.source == MANUAL_SOURCE:
+            stage = "9-verification"
+            trigger = MANUAL_SOURCE
+            provenance = (
+                f"MANUALLY ASSERTED by {verification.confirmed_by}, confirmed at "
+                f"{verification.confirmed_at.isoformat()} — no gateway verified this"
+            )
+        else:
+            stage = "6-verification"
+            trigger = verification.razorpay_event
+            provenance = f"razorpay event {verification.razorpay_event_id}"
         entries.append(
             TimelineEntry(
                 at=verification.verified_at,
-                stage="6-verification",
+                stage=stage,
                 record_id=verification.id,
                 summary=(
-                    f"{verification.razorpay_event} -> {verification.outcome}: "
+                    f"{trigger} -> {verification.outcome}: "
                     f"{_money_str(verification.amount_recovered)} of "
                     f"{_money_str(verification.amount_expected)} expected"
                     + (" — AMOUNT MISMATCH" if verification.amount_mismatch else "")
-                    + f" (razorpay event {verification.razorpay_event_id})"
+                    + f" ({provenance})"
                 ),
             )
         )

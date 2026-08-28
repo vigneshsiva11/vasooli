@@ -125,6 +125,54 @@ class MetricsSummary(BaseModel):
             "same money repeatedly."
         ),
     )
+
+    # --- how the recovery was established (Stage 9) ---
+    #
+    # `total_revenue_recovered` is the sum of the two amounts below and is reported
+    # unsplit as well, because it is the honest answer to "how much came back". The
+    # split exists because the two are not equally well evidenced, and a dashboard
+    # that added them into one bar would present a merchant's assertion as the
+    # gateway's word.
+
+    gateway_verified_recovered: float = Field(
+        ...,
+        description=(
+            "Of `total_revenue_recovered`, the portion Razorpay confirmed by signed "
+            "webhook about a payment link it hosts. This is the number to quote when "
+            "the claim is 'money verifiably returned'."
+        ),
+    )
+    manually_asserted_recovered: float = Field(
+        ...,
+        description=(
+            "Of `total_revenue_recovered`, the portion a merchant asserted through "
+            "POST /executions/{id}/confirm-payment after a contact-type "
+            "intervention. Real recovery of real receivables, and NOT gateway-"
+            "verified: no third party attests to it. Kept separate so it can never "
+            "be quoted as verified money by accident."
+        ),
+    )
+    recovery_rate_gateway_verified: float | None = Field(
+        ...,
+        description=(
+            "gateway_verified_recovered / total_revenue_at_risk, as a percentage. "
+            "The conservative reading of `recovery_rate`: identical to it before any "
+            "manual confirmation exists, and lower afterwards. Null when nothing is "
+            "at risk."
+        ),
+    )
+    distinct_recoveries_gateway_verified: int = Field(
+        ...,
+        description=(
+            "Of `distinct_recoveries_counted`, how many rest on a webhook. Records "
+            "written before Stage 9 carry no `source` field and are all webhook "
+            "records, so they count here."
+        ),
+    )
+    distinct_recoveries_manually_asserted: int = Field(
+        ...,
+        description="Of `distinct_recoveries_counted`, how many rest on an assertion.",
+    )
     methodology: str = Field(
         ..., description="How these numbers were derived, in plain words."
     )
@@ -224,11 +272,65 @@ class InterventionMetrics(BaseModel):
     verifiable: bool = Field(
         ...,
         description=(
-            "Whether an execution of this intervention can ever be verified. Only "
-            "link-type actions produce a Razorpay artifact that a webhook can "
-            "report on; a logged contact produces none, so its recovery_rate is "
-            "structurally 0 and means 'unobservable', not 'ineffective'. See "
+            "Whether an execution of this intervention can be verified by the "
+            "GATEWAY. Only link-type actions produce a Razorpay artifact a webhook "
+            "can report on; a logged contact produces none. The field name predates "
+            "Stage 9 and its value is unchanged — read it as `gateway_verifiable`, "
+            "and read `manually_confirmable` beside it, because a contact-type "
+            "intervention is no longer unverifiable outright. See "
             "docs/data-corrections.md."
+        ),
+    )
+    manually_confirmable: bool = Field(
+        ...,
+        description=(
+            "Whether an execution of this intervention can be confirmed by the "
+            "merchant through POST /executions/{id}/confirm-payment. True for the "
+            "contact-type interventions, and the exact complement of `verifiable` "
+            "for anything with an action_type: the two channels are exclusive by "
+            "design, because a manual override on a channel that has real "
+            "verification available is the same as not having it. Both are false for "
+            "the no-action variants, which execute nothing."
+        ),
+    )
+
+    # --- how this intervention's recoveries were established (Stage 9) ---
+
+    recoveries_gateway_verified: int = Field(
+        ...,
+        description=(
+            "Of `recoveries`, how many rest on a signed Razorpay webhook. Equal to "
+            "`recoveries` for every link-type intervention."
+        ),
+    )
+    recoveries_manually_asserted: int = Field(
+        ...,
+        description=(
+            "Of `recoveries`, how many rest on a merchant's assertion. Necessarily 0 "
+            "for a link-type intervention, since the manual path refuses those."
+        ),
+    )
+    revenue_recovered_gateway_verified: float = Field(
+        ...,
+        description="Of `revenue_recovered`, the gateway-confirmed portion.",
+    )
+    revenue_recovered_manually_asserted: float = Field(
+        ...,
+        description=(
+            "Of `revenue_recovered`, the asserted portion. A non-zero figure on a "
+            "contact-type row is the whole point of Stage 9; it is also money no "
+            "third party attests to, which is why it is a separate column and not "
+            "folded into the one above."
+        ),
+    )
+    recovery_rate_gateway_verified: float | None = Field(
+        ...,
+        description=(
+            "recoveries_gateway_verified / times_executed, as a percentage. The "
+            "conservative reading of `recovery_rate`, which counts both sources. "
+            "Structurally 0 for a contact-type intervention — that is what "
+            "`verifiable: false` means, and it is 'unobservable by the gateway', not "
+            "'ineffective'."
         ),
     )
 
@@ -420,16 +522,35 @@ class VasooliActual(BaseModel):
     kind: Literal["real"] = Field(
         ...,
         description=(
-            "Always 'real'. Executed through Razorpay test mode and verified by "
-            "signed webhook — not simulated, and not comparable to the three "
-            "figures above without saying so."
+            "Always 'real'. Not simulated — every rupee below was requested through "
+            "Razorpay test mode and then confirmed, so this is not comparable to the "
+            "three figures above without saying so. 'Real' is the opposite of "
+            "simulated and does NOT mean every rupee is gateway-attested: read the "
+            "two source columns below for that."
         ),
     )
     revenue_recovered: float = Field(
         ...,
         description=(
-            "Deduplicated recovered amount from VerificationRecords. The same "
-            "number as `total_revenue_recovered` on /metrics/summary."
+            "Deduplicated recovered amount from VerificationRecords, across both "
+            "verification sources. The same number as `total_revenue_recovered` on "
+            "/metrics/summary, and the exact sum of the two fields below."
+        ),
+    )
+    revenue_recovered_gateway_verified: float = Field(
+        ...,
+        description=(
+            "Of the above, the portion Razorpay confirmed by signed webhook. The "
+            "figure to quote against the simulated baselines when the claim is that "
+            "a third party attests to the outcome."
+        ),
+    )
+    revenue_recovered_manually_asserted: float = Field(
+        ...,
+        description=(
+            "Of the above, the portion a merchant asserted after a contact-type "
+            "intervention (Stage 9). Real recovery, no gateway attestation — split "
+            "out here for the same reason it is split on /metrics/summary."
         ),
     )
     events_recovered: int = Field(..., description="Distinct events money came back on.")

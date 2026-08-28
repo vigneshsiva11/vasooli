@@ -1,0 +1,20 @@
+{
+  "verification": {
+    "_id": "6a9128b41f4ad9695801ba04",
+    "event_id": "demo_172_rcv",
+    "execution_id": "6a8fff171cbbe8161ee8469f",
+    "outcome": "recovered",
+    "amount_recovered": 100.0,
+    "amount_expected": 2218.95,
+    "amount_mismatch": true,
+    "verified_at": "2026-08-28T06:20:36.599000",
+    "source": "manual_confirmation",
+    "confirmation_id": "manual_conf_6a8fff171cbbe8161ee8469f",
+    "confirmed_by": "merchant_via_api",
+    "confirmed_at": "2026-08-28T06:20:36.599000"
+  },
+  "event_id": "demo_172_rcv",
+  "status_before_probe": "awaiting_promise",
+  "status_after_probe": "recovered",
+  "why": "created by adversarial case G15; string amount coerced by pydantic lax mode"
+}

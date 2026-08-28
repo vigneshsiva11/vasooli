@@ -28,8 +28,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.models.verification import (
     ALLOWED_OUTCOMES,
+    ALLOWED_SOURCES,
     VerificationRecordDocument,
     WebhookAck,
+    verification_document,
 )
 from app.routes.events import database_ready
 from app.webhooks import service, signature, store
@@ -127,6 +129,15 @@ async def list_verification_records(
         default=None,
         description="Restrict to one outcome: recovered, expired, cancelled, not_recovered.",
     ),
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Restrict to how the recovery was established: 'webhook' (Razorpay's "
+            "signed word) or 'manual_confirmation' (a merchant's assertion after a "
+            "contact-type intervention). Records written before Stage 9 carry no "
+            "source field and are all webhook records, so 'webhook' matches them too."
+        ),
+    ),
     history: bool = Query(
         default=False,
         description=(
@@ -145,10 +156,16 @@ async def list_verification_records(
                 f"{sorted(ALLOWED_OUTCOMES)}."
             ),
         )
+    if source is not None and source not in ALLOWED_SOURCES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{source!r} is not a verification source. Allowed: "
+                f"{sorted(ALLOWED_SOURCES)}."
+            ),
+        )
 
     documents = await store.list_verifications(
-        event_id=event_id, history=history, outcome=outcome
+        event_id=event_id, history=history, outcome=outcome, source=source
     )
-    return [
-        VerificationRecordDocument.from_document(document) for document in documents
-    ]
+    return [verification_document(document) for document in documents]

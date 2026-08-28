@@ -42,7 +42,7 @@ net figure against gross baselines would understate Vasooli by its own costs.
 from __future__ import annotations
 
 from app.decision.matrix import candidates_for
-from app.metrics.aggregate import is_eligible
+from app.metrics.aggregate import is_eligible, split_by_source
 from app.metrics.reader import (
     Snapshot,
     distinct_recoveries,
@@ -81,7 +81,10 @@ METHODOLOGY = (
     "no action was taken to produce them, no money moved, and they are what-if "
     "estimates built from the Stage 3 matrix's calibrated (not measured) "
     "probabilities. ONLY vasooli_actual is real — money that was actually requested "
-    "through Razorpay test mode and confirmed by signed webhook. The two are not "
+    "through Razorpay test mode and then confirmed, either by signed webhook or, for "
+    "a contact-type intervention that produces no link for a webhook to report on, by "
+    "the merchant; vasooli_actual splits the two and only the webhook portion is "
+    "attested by a third party. The two are not "
     "comparable as achievement: the simulated figures score every eligible event, "
     "while the real one reflects the small number of events actually driven through "
     "execution and verification during development. The comparison that IS valid is "
@@ -96,12 +99,16 @@ METHODOLOGY = (
 ACTUAL_CAVEAT = (
     "This is far below the three simulated figures and that gap is not "
     "underperformance. The simulated figures score every eligible event; this one "
-    "counts only events actually executed and then verified by webhook during "
-    "development. Two structural limits also apply: contact-type interventions "
-    "produce no Razorpay artifact, so no webhook can ever report a recovery for "
-    "them, which makes every receivable event unverifiable by construction (see "
+    "counts only events actually executed and then confirmed during development. Two "
+    "structural limits also apply: contact-type interventions produce no Razorpay "
+    "artifact, so no webhook can ever report a recovery for them (see "
     "docs/data-corrections.md); and each recovery is counted once per execution "
-    "rather than once per webhook record."
+    "rather than once per verification record. Since Stage 9 that first limit is a "
+    "limit on GATEWAY verification only — a contact-type recovery can be confirmed by "
+    "the merchant instead, which is why revenue_recovered is split into "
+    "revenue_recovered_gateway_verified and revenue_recovered_manually_asserted. "
+    "Only the first is attested by a third party, and it is the one to compare "
+    "against the simulated baselines."
 )
 
 
@@ -243,11 +250,20 @@ def compare(snapshot: Snapshot) -> BaselineComparison:
     )
 
     survivors, _ = distinct_recoveries(snapshot.verifications)
+    # The same partition `summarize` applies, from the same helper, so the two
+    # endpoints cannot disagree about which recoveries a gateway attests to.
+    gateway_records, asserted_records = split_by_source(survivors)
+    gateway_recovered = money(
+        sum(document["amount_recovered"] for document in gateway_records)
+    )
+    asserted_recovered = money(
+        sum(document["amount_recovered"] for document in asserted_records)
+    )
     actual = VasooliActual(
         kind="real",
-        revenue_recovered=money(
-            sum(document["amount_recovered"] for document in survivors.values())
-        ),
+        revenue_recovered=money(gateway_recovered + asserted_recovered),
+        revenue_recovered_gateway_verified=gateway_recovered,
+        revenue_recovered_manually_asserted=asserted_recovered,
         events_recovered=len({document["event_id"] for document in survivors.values()}),
         executions_verified_recovered=len(survivors),
         caveat=ACTUAL_CAVEAT,

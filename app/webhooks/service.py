@@ -42,8 +42,8 @@ from app.models.verification import (
     OUTCOME_FOR_EVENT,
     RECOVERED_OUTCOME,
     SUBSCRIBED_EVENTS,
-    VerificationRecord,
     WebhookAck,
+    WebhookVerification,
     amounts_differ,
 )
 from app.policy.store import COLLECTION_NAME as VERDICT_COLLECTION
@@ -141,8 +141,8 @@ def _recovered_amount(*, event: str, entity: dict[str, Any]) -> float:
     return from_minor_units(paid)
 
 
-async def _expected_amount(execution: dict[str, Any]) -> float:
-    """The amount the link was created for: the authorized decision's `revenue_at_risk`.
+async def expected_amount(execution: dict[str, Any]) -> float:
+    """The amount the action was for: the authorized decision's `revenue_at_risk`.
 
     Walks execution → policy verdict → decision, which is the same chain
     `app/execution/store.py` walks in its write-time guard, and lands on the exact
@@ -150,6 +150,12 @@ async def _expected_amount(execution: dict[str, Any]) -> float:
     the link's own `amount` back out of the webhook instead would be circular: it
     would compare Razorpay's echo of our number against Razorpay's echo of our
     number.
+
+    Public, and shared with Stage 9's manual path (`app/webhooks/manual.py`), which
+    needs the same number for the same comparison. Every execution carries a
+    `policy_verdict_id` regardless of action type, so the chain resolves for a logged
+    contact exactly as it does for a generated link — which is why the manual path
+    reuses this rather than deriving "what was owed" a second way.
 
     Raises:
         LookupError: the chain is broken. Only possible if a verdict or decision was
@@ -280,7 +286,7 @@ async def reconcile(webhook: VerifiedWebhook) -> WebhookAck:
 
     # 5. Assemble the statement. Both amounts, then the comparison.
     try:
-        amount_expected = await _expected_amount(execution)
+        amount_expected = await expected_amount(execution)
     except LookupError as exc:
         logger.error(
             "Webhook %s matched execution %s for event %s, but the expected amount "
@@ -321,7 +327,7 @@ async def reconcile(webhook: VerifiedWebhook) -> WebhookAck:
             webhook.razorpay_event_id,
         )
 
-    record = VerificationRecord(
+    record = WebhookVerification(
         event_id=event_id,
         execution_id=str(execution["_id"]),
         razorpay_event_id=webhook.razorpay_event_id,
@@ -396,6 +402,18 @@ async def has_recovered(event_id: str) -> dict[str, Any] | None:
     definition in the codebase: a stored `VerificationRecord` with outcome
     `recovered`. A second implementation of that question is precisely how a
     follow-up gets sent to somebody who already paid.
+
+    **There is no `source` filter, and that is the decision, not an omission.** A
+    manual confirmation counts here exactly as a webhook does, which has two
+    consequences, both intended. It makes `promised -> honored` reachable for a
+    contact-only event, which before Stage 9 it was not — the only path to `honored`
+    runs through this predicate. And it stops a follow-up being sent to a customer
+    the merchant has already told us paid, which is the failure this function exists
+    to prevent and does not become acceptable because the evidence was a human's.
+
+    Money totals are a different question, and they DO split by source: see
+    `app/metrics/aggregate.py`. Suppressing a chase and counting revenue are not the
+    same decision, so they do not read the same filter.
     """
     for verification in await store.list_for_event(event_id):
         if verification.get("outcome") == RECOVERED_OUTCOME:

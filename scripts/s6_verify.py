@@ -484,10 +484,12 @@ async def phase_5_mismatch(client: httpx.AsyncClient, link: dict[str, Any]) -> N
     touched.append(f"events: {record['event_id']} status now {status} (was at_risk before Stage 6)")
 
     # And the flag cannot be lied about at the model level.
-    from app.models.verification import VerificationRecord
+    # Stage 9 turned `VerificationRecord` into a discriminated union over `source`,
+    # which is not callable, so the webhook variant is named directly here.
+    from app.models.verification import WebhookVerification
 
     try:
-        VerificationRecord(
+        WebhookVerification(
             event_id=record["event_id"],
             execution_id=str(record["execution_id"]),
             razorpay_event_id=f"{RUN}_mismatch_lie",

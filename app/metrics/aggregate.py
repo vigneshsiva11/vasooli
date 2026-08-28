@@ -15,6 +15,13 @@ than buried here:
    execution — see `distinct_recoveries` for why there are more records than
    payments — and the number set aside is reported beside every figure that depends
    on it.
+3. **Recovered money is split by how it was established.** Stage 9 added a second
+   verification source: a merchant confirming payment after a contact-type
+   intervention, where no Razorpay artifact exists for a webhook to report on. Both
+   sources are real recovery and both are counted, but they are not equally
+   evidenced, so every money and count figure that includes asserted money also
+   appears with only the gateway-verified portion. Nothing here adds the two into a
+   single unlabelled number.
 """
 
 from __future__ import annotations
@@ -31,7 +38,11 @@ from app.metrics.reader import (
 from app.models.decision import ALLOWED_INTERVENTIONS, NO_ACTION_INTERVENTIONS
 from app.models.diagnosis import NON_RECOVERABLE_ROOT_CAUSES
 from app.models.events import ALLOWED_EVENT_STATUSES
-from app.models.execution import ACTION_FOR_INTERVENTION, LINK_ACTION_TYPES
+from app.models.execution import (
+    ACTION_FOR_INTERVENTION,
+    CONTACT_ACTION_TYPES,
+    LINK_ACTION_TYPES,
+)
 from app.models.metrics import (
     InterventionMetrics,
     MetricsSummary,
@@ -39,6 +50,7 @@ from app.models.metrics import (
     RootCauseMetrics,
 )
 from app.models.promise import OPEN_PROMISE_STATE, REQUIRES_FOLLOW_UP_SENT
+from app.models.verification import MANUAL_SOURCE, source_of
 
 SUMMARY_METHODOLOGY = (
     "total_revenue_at_risk is a plain sum over every stored event, with nothing "
@@ -47,10 +59,19 @@ SUMMARY_METHODOLOGY = (
     "synthetic data. non_recoverable_at_risk reports the portion the system "
     "deliberately declined to chase, so the rate can be read either way. "
     "total_revenue_recovered counts each recovered payment once, per execution: "
-    "recovered_verification_records is the raw count of webhook records and is "
+    "recovered_verification_records is the raw count of verification records and is "
     "higher, because one payment link can be reported by several distinct Razorpay "
-    "events, and summing those would report money that never existed. All figures "
-    "are computed live from the collections on every request; nothing is cached."
+    "events, and summing those would report money that never existed. "
+    "total_revenue_recovered spans BOTH verification sources and is the exact sum of "
+    "gateway_verified_recovered (Razorpay's signed word about a payment link) and "
+    "manually_asserted_recovered (a merchant's confirmation after a contact-type "
+    "intervention, which produces no gateway artifact for a webhook to report on). "
+    "Both are real recovery; only the first is attested by a third party, so "
+    "recovery_rate_gateway_verified is reported alongside recovery_rate and is the "
+    "conservative figure to quote. Verification records written before Stage 9 carry "
+    "no source field, are all webhook records, and count as gateway-verified. All "
+    "figures are computed live from the collections on every request; nothing is "
+    "cached."
 )
 
 PROMISE_METHODOLOGY = (
@@ -67,14 +88,57 @@ PROMISE_METHODOLOGY = (
 # ---------------------------------------------------------------------------
 
 
+def _is_manual(document: dict) -> bool:
+    """Whether a stored verification rests on an assertion rather than a webhook.
+
+    Reads `source_of` rather than `document["source"]` so the 42 records written
+    before Stage 9 — which have no `source` field at all — are classified the same
+    way the model layer classifies them when it parses them. Two definitions of
+    "which source is this" would eventually disagree, and the figure that would go
+    wrong is the one separating verified money from asserted money.
+    """
+    return source_of(document) == MANUAL_SOURCE
+
+
+def split_by_source(
+    survivors: dict[str, dict],
+) -> tuple[list[dict], list[dict]]:
+    """Partition deduplicated recoveries into (gateway-verified, manually asserted).
+
+    A partition, not two filters: every record lands in exactly one list, so the two
+    always sum back to the whole and no figure derived from them can quietly omit a
+    record whose source is something neither branch recognised.
+
+    Public because `app/metrics/baseline.py` applies the same split to the same
+    records. One definition, shared, so `/metrics/summary` and
+    `/metrics/baseline-comparison` cannot disagree about which recoveries a gateway
+    attests to.
+    """
+    gateway: list[dict] = []
+    asserted: list[dict] = []
+    for document in survivors.values():
+        (asserted if _is_manual(document) else gateway).append(document)
+    return gateway, asserted
+
+
 def summarize(snapshot: Snapshot) -> MetricsSummary:
     """Compute the headline recovery numbers."""
     at_risk = money(sum(event["amount"] for event in snapshot.events))
 
     survivors, duplicates_ignored = distinct_recoveries(snapshot.verifications)
-    recovered = money(
-        sum(document["amount_recovered"] for document in survivors.values())
+    gateway_records, asserted_records = split_by_source(survivors)
+    gateway_recovered = money(
+        sum(document["amount_recovered"] for document in gateway_records)
     )
+    asserted_recovered = money(
+        sum(document["amount_recovered"] for document in asserted_records)
+    )
+    # Summed from the two reported parts rather than over `survivors` again, so the
+    # total a dashboard prints is exactly the sum of the two figures printed beside
+    # it. Rounding twice on separate subsets and once on the whole can differ by a
+    # paisa, and a total that does not equal its own split invites the reader to
+    # assume one of the three numbers is measuring something else.
+    recovered = money(gateway_recovered + asserted_recovered)
 
     # Every declared status is present, including the ones at zero: a dashboard
     # should not have to tell "no events in this state" apart from "this state was
@@ -116,6 +180,11 @@ def summarize(snapshot: Snapshot) -> MetricsSummary:
         recovered_verification_records=len(survivors) + duplicates_ignored,
         distinct_recoveries_counted=len(survivors),
         duplicate_verification_records_ignored=duplicates_ignored,
+        gateway_verified_recovered=gateway_recovered,
+        manually_asserted_recovered=asserted_recovered,
+        recovery_rate_gateway_verified=percentage(gateway_recovered, at_risk),
+        distinct_recoveries_gateway_verified=len(gateway_records),
+        distinct_recoveries_manually_asserted=len(asserted_records),
         methodology=SUMMARY_METHODOLOGY,
         computed_at=snapshot.read_at,
     )
@@ -200,6 +269,12 @@ def by_intervention(snapshot: Snapshot) -> list[InterventionMetrics]:
     how many times this was the recommendation, and a re-decision genuinely is a
     second occasion. That is why these counts do not sum to the event totals in
     `summarize`, which are deliberately per-event.
+
+    `recovery_rate` counts recoveries from both verification sources.
+    `recovery_rate_gateway_verified` counts only the webhook-attested ones, and is
+    the figure to read when the question is what a third party confirms. On a
+    contact-type row the two now differ, which is exactly what Stage 9 changed: such
+    a row used to be able to report nothing but zero.
     """
     decisions_by_oid = snapshot.decisions_by_object_id()
     executions_by_oid = snapshot.executions_by_object_id()
@@ -232,15 +307,27 @@ def by_intervention(snapshot: Snapshot) -> list[InterventionMetrics]:
 
     recoveries: dict[str, int] = {}
     recovered_money: dict[str, float] = {}
+    gateway_recoveries: dict[str, int] = {}
+    gateway_money: dict[str, float] = {}
+    asserted_recoveries: dict[str, int] = {}
+    asserted_money: dict[str, float] = {}
     for verification in survivors.values():
         execution = executions_by_oid.get(verification.get("execution_id", ""))
         if execution is None:  # pragma: no cover - a write-time guard prevents this
             continue
         name = execution["intervention"]
+        amount = verification["amount_recovered"]
         recoveries[name] = recoveries.get(name, 0) + 1
-        recovered_money[name] = (
-            recovered_money.get(name, 0.0) + verification["amount_recovered"]
-        )
+        recovered_money[name] = recovered_money.get(name, 0.0) + amount
+        # The same partition `summarize` uses, applied per intervention. Counted here
+        # rather than re-derived from the totals so a row's split cannot disagree with
+        # the headline's.
+        if _is_manual(verification):
+            asserted_recoveries[name] = asserted_recoveries.get(name, 0) + 1
+            asserted_money[name] = asserted_money.get(name, 0.0) + amount
+        else:
+            gateway_recoveries[name] = gateway_recoveries.get(name, 0) + 1
+            gateway_money[name] = gateway_money.get(name, 0.0) + amount
 
     rows: list[InterventionMetrics] = []
     for name in sorted(set(recommended) | set(authorized) | set(executed) | set(failed)):
@@ -258,9 +345,20 @@ def by_intervention(snapshot: Snapshot) -> list[InterventionMetrics]:
                 revenue_recovered=money(recovered_money.get(name, 0.0)),
                 action_type=action_type,
                 # A logged contact creates no Razorpay artifact, so no webhook can
-                # ever report on it and its recovery_rate is structurally zero.
-                # Flagged rather than left to be misread as ineffectiveness.
+                # ever report on it. Its GATEWAY rate is therefore structurally zero,
+                # which is what this flag says and has always said. Since Stage 9 it
+                # is no longer the whole story — `manually_confirmable` names the
+                # channel such an intervention does have — so the two are reported
+                # together and neither is left to be misread as ineffectiveness.
                 verifiable=action_type in LINK_ACTION_TYPES,
+                manually_confirmable=action_type in CONTACT_ACTION_TYPES,
+                recoveries_gateway_verified=gateway_recoveries.get(name, 0),
+                recoveries_manually_asserted=asserted_recoveries.get(name, 0),
+                revenue_recovered_gateway_verified=money(gateway_money.get(name, 0.0)),
+                revenue_recovered_manually_asserted=money(asserted_money.get(name, 0.0)),
+                recovery_rate_gateway_verified=percentage(
+                    gateway_recoveries.get(name, 0), completed
+                ),
             )
         )
 

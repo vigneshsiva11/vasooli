@@ -66,10 +66,15 @@ async def metrics_by_intervention() -> list[InterventionMetrics]:
 
     `times_executed` can never exceed `times_authorized`: an execution requires an
     authorized verdict, enforced by a unique index on `policy_verdict_id` and by the
-    write-time referential guard in `app/execution/store.py`. Read `verifiable`
-    before reading `recovery_rate` — a contact-type intervention produces no
-    Razorpay artifact, so no webhook can report a recovery for it and its rate is
-    structurally zero.
+    write-time referential guard in `app/execution/store.py`.
+
+    Read `verifiable` and `manually_confirmable` before reading either rate. A
+    contact-type intervention produces no Razorpay artifact, so no webhook can report
+    a recovery for it and `recovery_rate_gateway_verified` is structurally zero; what
+    it does have since Stage 9 is a merchant-confirmation channel, and a recovery
+    established that way appears in `recovery_rate` and in
+    `recoveries_manually_asserted`. The two rates are reported separately rather than
+    blended so asserted money is never read as gateway-verified money.
     """
     return metrics.by_intervention(await metrics.load_snapshot())
 

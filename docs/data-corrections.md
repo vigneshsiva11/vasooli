@@ -1189,3 +1189,94 @@ Revert the two script edits; nothing else was touched. No database document, ind
 collection was read or written in producing these figures beyond the read-only
 `GET /metrics/*` calls, which were confirmed byte-for-byte non-mutating at checkpoint 7
 by SHA-256 fingerprinting all 8 collections before and after.
+
+---
+
+## 2026-08-28 — Stage 9: one verification record written by an adversarial probe, deleted, and a terminal event status walked back by direct write
+
+### What was wrong
+
+This is a **test-design error of mine, not a defect in Stage 9's code**. The endpoint
+did exactly what it is specified to do; the input I sent it was valid, and I had
+assumed it was not.
+
+Adversarial case G15 sent `{"amount_recovered": "100.00"}` — a numeric *string* — to
+`POST /executions/6a8fff171cbbe8161ee8469f/confirm-payment`, expecting a 422 on the
+type. Pydantic v2 in lax mode coerces `"100.00"` to `100.0`, so the body was valid,
+and the endpoint correctly:
+
+- wrote verification `6a9128b41f4ad9695801ba04` asserting 100.00 against an expected
+  2,218.95, flagged `amount_mismatch: true` and logged the mismatch at WARNING;
+- transitioned `demo_172_rcv` from `awaiting_promise` to `recovered`.
+
+The compounding mistake was where I pointed the probe. The malformed-body cases were
+aimed at `6a8fff171cbbe8161ee8469f`, a live Stage 9 demonstration target, on the
+assumption that every one of them would be refused before reaching the database. Three
+of the fifteen cases carried a body that could in principle validate; one did.
+
+### What was done
+
+1. the record was archived verbatim to
+   `.s9_archive/accidental_manual_confirmation.json` (723 bytes), including the
+   event's status before and after the probe, and read back before anything was
+   deleted;
+2. verification `6a9128b41f4ad9695801ba04` was deleted by raw Mongo `delete_one`;
+3. `demo_172_rcv` was returned to `awaiting_promise` by a raw Mongo `$set`.
+
+The test method was corrected as well as the data. Malformed-body probes are now
+aimed at a **link-producing** execution, which the allowlist refuses at step 5
+regardless of what the body contains. That makes a write structurally impossible
+during body-validation testing, and it also makes the two outcomes legible: 422 means
+the body was refused, 409 means the body validated and something downstream refused
+it. A probe suite whose safety depends on every case failing is a suite with no
+margin; this one cannot write even if a case unexpectedly validates.
+
+### Why step 3 had to be a direct write
+
+`app/models/events.py:ALLOWED_STATUS_TRANSITIONS` gives `recovered` no outgoing
+edges — it is in `TERMINAL_EVENT_STATUSES`. `transition_event_status` therefore
+cannot walk an event out of it, by design: the guard exists so that recovered money
+cannot be un-recovered through the API. Reversing an accidental entry into a terminal
+state has no guarded path and cannot have one. The direct write is disclosed here for
+that reason, and it is the only write in Stage 9 that bypassed application code.
+
+### What changed in the data, and what did not
+
+Restored: 42 verification documents, 0 with `source: "manual_confirmation"`,
+`demo_172_rcv` at `awaiting_promise`. Confirmed by count and by status read before the
+three deliberate confirmations were made.
+
+Not affected: the promise on `demo_172_rcv` was untouched throughout and stayed
+`broken` — `POST /promises/{event_id}/check` was never called during the probe, so no
+promise state was derived from the accidental record. The event was later confirmed
+deliberately, for 2,218.95 with `amount_mismatch: false`, as verification
+`6a9129fd0dfca556c4d76483`.
+
+### The change this prompted, ratified 2026-08-28
+
+`amount_recovered` is the one field on `ManualPaymentConfirmation` that cannot be
+re-derived from anything else in the system — `amount_expected` comes from the verdict
+chain, `event_id` from the execution, `confirmation_id` from the execution id, `source`
+and `confirmed_by` are constants. Everything else can be checked against a second
+source; this cannot, so it has to arrive exactly as sent.
+
+It now carries `strict=True`, and it is the only strict field in
+`app/models/verification.py`. Under lax mode it accepted `"100.00"`, `"1e3"`, `" 100 "`
+and `true` as money; all four are now 422 `float_type`. A JSON integer is still
+accepted, because a whole-rupee `2218` is a legitimate amount — verified over HTTP as
+part of the change, along with `gt=0` still being enforced beneath the strictness.
+
+The strictness is on the request model only, not on `ManualVerification`. The request
+model is the trust boundary; the record model's job is the arithmetic invariants, and
+it also parses documents back out of MongoDB, where numeric types are BSON's business
+rather than a caller's.
+
+### How to reverse this
+
+There is nothing to reverse — this entry documents a reversal already performed. To
+*restore* the accidental record, re-insert the `verification` object from
+`.s9_archive/accidental_manual_confirmation.json` and `$set` `demo_172_rcv` to
+`recovered`. Doing so would collide with the deliberate confirmation on the same
+execution: `uniq_confirmation_id` is unique and both records carry
+`manual_conf_6a8fff171cbbe8161ee8469f`, so the insert would be refused. That collision
+is the partial unique index from Stage 9's own migration doing its job.
