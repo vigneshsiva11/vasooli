@@ -79,6 +79,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_mongo_connection()
 
 
+from fastapi.middleware.cors import CORSMiddleware
+
 settings = get_settings()
 
 app = FastAPI(
@@ -86,6 +88,14 @@ app = FastAPI(
     description="AI revenue recovery agent — the LLM recommends, policy authorizes.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
