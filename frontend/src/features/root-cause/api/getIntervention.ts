@@ -5,7 +5,7 @@ import type { components } from '@/api/schema';
 type InterventionMetrics = components['schemas']['InterventionMetrics'];
 
 export const getIntervention = async ({ signal }: { signal?: AbortSignal }) => {
-  return apiClient<InterventionMetrics>('/metrics/by-intervention', { signal });
+  return apiClient<InterventionMetrics[]>('/metrics/by-intervention', { signal });
 };
 
 export const useInterventionQuery = () => {

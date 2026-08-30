@@ -8,19 +8,7 @@ import { StatusBreakdown } from './StatusBreakdown';
 import { DashboardSkeleton } from './DashboardSkeleton';
 import { DashboardErrorBoundary } from './DashboardErrorBoundary';
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-};
-
-const formatPercent = (value: number | null) => {
-  if (value === null) return 'N/A';
-  return `${value.toFixed(1)}%`;
-};
+import { formatCurrency, formatPercentage } from '@/utils/formatters';
 
 const DashboardContent: React.FC = () => {
   const { data } = useSummaryQuery();
@@ -71,11 +59,11 @@ const DashboardContent: React.FC = () => {
         <HeadlineMetric
           title="Recovery Rate"
           icon={BarChart3}
-          value={<AnimatedNumber value={data.recovery_rate ?? 0} formatFn={() => formatPercent(data.recovery_rate)} />}
+          value={<AnimatedNumber value={data.recovery_rate ?? 0} formatFn={formatPercentage} />}
         >
            <div className="flex justify-between items-center text-xs">
               <span className="text-[var(--color-text-muted)]">Gateway Verified Rate</span>
-              <span className="font-medium text-[var(--color-status-recovered)]">{formatPercent(data.recovery_rate_gateway_verified)}</span>
+              <span className="font-medium text-[var(--color-status-recovered)]">{formatPercentage(data.recovery_rate_gateway_verified)}</span>
            </div>
         </HeadlineMetric>
 

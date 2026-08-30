@@ -5,7 +5,7 @@ import type { components } from '@/api/schema';
 type RootCauseMetrics = components['schemas']['RootCauseMetrics'];
 
 export const getRootCause = async ({ signal }: { signal?: AbortSignal }) => {
-  return apiClient<RootCauseMetrics>('/metrics/by-root-cause', { signal });
+  return apiClient<RootCauseMetrics[]>('/metrics/by-root-cause', { signal });
 };
 
 export const useRootCauseQuery = () => {
