@@ -1,0 +1,3 @@
+import React from 'react';
+
+export const BaselineSkeleton: React.FC = () => <div className="space-y-10 animate-pulse"><div><div className="h-3 w-32 rounded bg-gray-200" /><div className="mt-3 h-9 w-72 rounded bg-gray-200" /><div className="mt-3 h-4 w-[30rem] max-w-full rounded bg-gray-100" /></div><div className="rounded-xl border border-gray-100 bg-white p-6"><div className="h-5 w-52 rounded bg-gray-200" /><div className="mt-6 space-y-6">{[1, 2, 3].map((item) => <div key={item} className="flex items-center gap-5"><div className="h-4 w-28 rounded bg-gray-100" /><div className="h-10 flex-1 rounded bg-gray-100" /></div>)}</div></div><div className="h-56 rounded-xl border border-gray-100 bg-white" /></div>;

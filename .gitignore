@@ -48,6 +48,7 @@ logs/
 .chrome-exec-diagnostic/
 .chrome-root-cause/
 .chrome-root-cause-funnel/
+.chrome-baseline-diagnostic/
 
 # Stage 9 scratch (throwaway probe scripts, not evidence)
 .s9_tmp/
