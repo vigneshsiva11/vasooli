@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import type { components } from '@/api/schema';
 import { formatCurrency, formatLabel } from '@/utils/formatters';
 import { useAuditTrailQuery, useEventsQuery } from '../api/getAuditTrail';
+import { AuditTrailErrorBoundary } from './AuditTrailErrorBoundary';
+import { AuditTrailSkeleton } from './AuditTrailSkeleton';
 
 type Diagnosis = components['schemas']['DiagnosisRecord'];
 type Decision = components['schemas']['DecisionRecord'];
@@ -70,7 +72,7 @@ function Trail({ eventId }: { eventId: string }) {
   const blockedReason = data.policy_verdicts.find((item) => item.verdict === 'blocked')?.reason;
   const summary = recovered ? `Recovered ${formatCurrency(data.revenue_recovered)} via ${formatLabel(data.executions[0]?.intervention ?? 'execution')}; gateway verification is recorded below.` : blocked ? `Blocked — ${formatLabel(blockedReason ?? 'policy')}. No action was authorized.` : data.promises.length ? `Awaiting promise — customer committed to pay by ${data.promises[0].promised_date}.` : 'Still at risk — no completed recovery path recorded.';
   return <div className="mt-6 space-y-7">
-    <section className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm"><div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><p className="font-mono text-sm font-semibold text-[var(--color-primary)]">{data.event_id}</p><p className="mt-1 text-sm text-[var(--color-text-muted)]">{summary}</p></div><div className="text-left md:text-right"><p className="text-2xl font-bold text-[var(--color-primary)]">{formatCurrency(data.event.amount)}</p><span className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">{data.event.status}</span></div></div></section>
+    <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm"><div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><p className="font-mono text-sm font-semibold text-[var(--color-primary)]">{data.event_id}</p><p className="mt-1 text-sm text-[var(--color-text-muted)]">{summary}</p></div><div className="text-left md:text-right"><p className="text-2xl font-bold text-[var(--color-primary)]">{formatCurrency(data.event.amount)}</p><span className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">{data.event.status}</span></div></div></section>
     <div className="space-y-7">
       <Stage color="bg-[var(--color-status-risk)]" title="Ingestion"><p>{data.event.surface} · raw reason <strong>{data.event.raw_failure_reason}</strong> · customer {data.event.customer_ref} · {data.event.created_at}</p></Stage>
       <Stage color="bg-[var(--color-accent)]" empty="No diagnosis recorded." title="Diagnosis">{data.diagnoses.length ? <VersionedPanel records={data.diagnoses} render={(item) => <DiagnosisCard item={item} />} stage="Diagnosis" /> : null}</Stage>
@@ -89,10 +91,10 @@ export function AuditTrailRoute() {
   const [term, setTerm] = useState('');
   const matches = useMemo(() => events.filter((event) => event.event_id.toLowerCase().includes(term.toLowerCase())).slice(0, 8), [events, term]);
   return <div className="space-y-6 pb-12">
-    <header><h1 className="text-3xl font-bold tracking-tight text-[var(--color-primary)]">Audit Trail Explorer</h1><p className="mt-1 text-sm text-[var(--color-text-muted)]">One event’s explainable path from ingestion through policy and recovery.</p></header>
-    <section className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm"><div className="flex flex-wrap gap-2">{EXAMPLES.map((item) => <button className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${selected === item.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white' : 'border-gray-200 hover:border-[var(--color-accent)]'}`} key={item.id} onClick={() => setSelected(item.id)} type="button">{item.label}</button>)}</div><input className="mt-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" onChange={(event) => setTerm(event.target.value)} placeholder="Search 305 event IDs…" value={term} />{term && <div className="mt-2 flex flex-wrap gap-2">{matches.map((item) => <button className="rounded bg-[var(--color-bg-surface)] px-2 py-1 font-mono text-xs" key={item.event_id} onClick={() => { setSelected(item.event_id); setTerm(''); }} type="button">{item.event_id}</button>)}</div>}</section>
-    <Suspense fallback={<div className="h-80 animate-pulse rounded-xl bg-white" />}><Trail eventId={selected} /></Suspense>
+    <header><h1 className="mt-2 text-3xl font-bold tracking-tight text-[var(--color-primary)]">Audit Trail Explorer</h1><p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">One event’s explainable path from ingestion through policy and recovery.</p></header>
+    <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm"><div className="flex flex-wrap gap-2">{EXAMPLES.map((item) => <button className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${selected === item.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white' : 'border-gray-200 hover:border-[var(--color-accent)]'}`} key={item.id} onClick={() => setSelected(item.id)} type="button">{item.label}</button>)}</div><input className="mt-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" onChange={(event) => setTerm(event.target.value)} placeholder="Search 305 event IDs…" value={term} />{term && <div className="mt-2 flex flex-wrap gap-2">{matches.map((item) => <button className="rounded bg-[var(--color-bg-surface)] px-2 py-1 font-mono text-xs" key={item.event_id} onClick={() => { setSelected(item.event_id); setTerm(''); }} type="button">{item.event_id}</button>)}</div>}</section>
+    <Suspense fallback={<AuditTrailSkeleton />}><Trail eventId={selected} /></Suspense>
   </div>;
 }
 
-export default AuditTrailRoute;
+export default function AuditTrailRouteWithBoundary() { return <AuditTrailErrorBoundary><AuditTrailRoute /></AuditTrailErrorBoundary>; }

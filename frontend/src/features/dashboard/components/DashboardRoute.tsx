@@ -16,8 +16,8 @@ const DashboardContent: React.FC = () => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-[var(--color-primary)]">Recovery Command Center</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-1">
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-[var(--color-primary)]">Recovery Command Center</h1>
+        <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
           Real-time overview of system health and recovery metrics.
         </p>
       </div>

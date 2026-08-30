@@ -1,4 +1,5 @@
 import React, { Suspense } from 'react';
+import { motion } from 'framer-motion';
 import { useRootCauseQuery } from '../api/getRootCause';
 import { useInterventionQuery } from '../api/getIntervention';
 import { RootCauseSection } from './RootCauseSection';
@@ -11,10 +12,10 @@ const RootCauseContent: React.FC = () => {
   const { data: interventionData } = useInterventionQuery();
 
   return (
-    <div className="space-y-10 pb-12">
+    <motion.div animate={{ opacity: 1, y: 0 }} className="space-y-10 pb-12" initial={{ opacity: 0, y: 8 }} transition={{ duration: 0.22 }}>
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-[var(--color-primary)]">Root Cause & Intervention</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-2 max-w-3xl">
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-[var(--color-primary)]">Root Cause & Intervention</h1>
+        <p className="mt-2 max-w-3xl text-sm text-[var(--color-text-muted)]">
           Understanding why revenue leaks occur, and tracking the complete funnel of interventions from recommendation through to final recovery.
         </p>
       </div>
@@ -23,7 +24,7 @@ const RootCauseContent: React.FC = () => {
         <RootCauseSection data={rootCauseData} />
         <InterventionFunnelSection data={interventionData} />
       </div>
-    </div>
+    </motion.div>
   );
 };
 

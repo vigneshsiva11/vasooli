@@ -21,12 +21,6 @@ export const InterventionFunnelRow: React.FC<FunnelRowProps> = ({ data }) => {
   const recPct = percentOfRecommended(
     data.recoveries_gateway_verified + data.recoveries_manually_asserted,
   );
-  const executedFillHeight = `${execPct}%`;
-
-  console.log(
-    `[InterventionFunnelRow] Executed fill diagnostic intervention=${data.intervention} timesExecuted=${data.times_executed} timesExecutedType=${typeof data.times_executed} timesRecommended=${data.times_recommended} execPct=${execPct} executedFillHeight=${executedFillHeight}`,
-  );
-
   // Drop-off percentages
   const recToAuthDrop = data.times_recommended > 0 
     ? ((data.times_recommended - data.times_authorized) / data.times_recommended) * 100 
@@ -78,7 +72,7 @@ export const InterventionFunnelRow: React.FC<FunnelRowProps> = ({ data }) => {
         {/* Connector 1 */}
         <div className="hidden md:flex flex-col items-center justify-center px-2 z-10 -mx-3">
           <div className="bg-white border border-gray-100 rounded-full text-[10px] font-bold text-red-400 px-2 py-1 shadow-sm">
-            -{recToAuthDrop.toFixed(0)}%
+            -{formatPercentage(recToAuthDrop, 0)}
           </div>
         </div>
 
@@ -94,13 +88,13 @@ export const InterventionFunnelRow: React.FC<FunnelRowProps> = ({ data }) => {
         {/* Connector 2 */}
         <div className="hidden md:flex flex-col items-center justify-center px-2 z-10 -mx-3">
           <div className="bg-white border border-gray-100 rounded-full text-[10px] font-bold text-red-400 px-2 py-1 shadow-sm">
-            -{authToExecDrop.toFixed(0)}%
+            -{formatPercentage(authToExecDrop, 0)}
           </div>
         </div>
 
         {/* Step 3: Executed */}
         <div className="flex-1 border border-gray-100 rounded-lg p-4 relative overflow-hidden flex flex-col justify-between h-[120px]">
-          <div className="absolute bottom-0 left-0 right-0 bg-[#7DD3FC] transition-all duration-1000" style={{ height: executedFillHeight }} />
+          <div className="absolute bottom-0 left-0 right-0 bg-[#7DD3FC] transition-all duration-1000" style={{ height: `${execPct}%` }} />
           <div className="relative z-10">
             <div className="flex justify-between items-start mb-1">
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Executed</div>

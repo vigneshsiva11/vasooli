@@ -7,9 +7,9 @@ export const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-export const formatPercentage = (value: number | null) => {
+export const formatPercentage = (value: number | null | undefined, fractionDigits = 1) => {
   if (value === null || value === undefined) return '0%';
-  return `${value.toFixed(1)}%`;
+  return `${value.toFixed(fractionDigits)}%`;
 };
 
 export const formatLabel = (key: string) => {

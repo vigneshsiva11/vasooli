@@ -20,7 +20,7 @@ export const RootCauseSkeleton: React.FC = () => {
                   <div className="h-4 w-24 bg-gray-100 rounded-md"></div>
                 </div>
                 <div className="h-2 w-full bg-gray-50 rounded-full mt-1 overflow-hidden">
-                  <div className={`h-full bg-gray-200 w-${i * 20}`}></div>
+                  <div className="h-full bg-gray-200" style={{ width: `${i * 20}%` }} />
                 </div>
               </div>
             ))}

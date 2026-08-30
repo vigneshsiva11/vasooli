@@ -1,2 +1,8 @@
 import React from 'react';
-export class PromiseErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: boolean }> { state = { error: false }; static getDerivedStateFromError() { return { error: true }; } render() { return this.state.error ? <div className="rounded-xl border border-[var(--color-status-blocked)]/20 bg-[var(--color-status-blocked)]/10 p-6 text-center"><h2 className="font-semibold text-[var(--color-primary)]">Unable to load promise data</h2><button className="mt-3 rounded border border-gray-200 bg-white px-3 py-2 text-sm" onClick={() => this.setState({ error: false })}>Try again</button></div> : this.props.children; } }
+import { RouteErrorPanel } from '@/components/RouteErrorPanel';
+
+export class PromiseErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() { return this.state.error ? <RouteErrorPanel error={this.state.error} message="We couldn't reach the backend to load promise data. Check the connection and try again." onRetry={() => this.setState({ error: null })} title="Unable to load promise data" /> : this.props.children; }
+}

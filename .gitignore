@@ -51,6 +51,8 @@ logs/
 .chrome-baseline-diagnostic/
 .chrome-ptp-diagnostic/
 .chrome-audit-diagnostic/
+.chrome-f6-audit/
+*-runtime-proof.png
 
 # Stage 9 scratch (throwaway probe scripts, not evidence)
 .s9_tmp/
