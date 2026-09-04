@@ -25,7 +25,7 @@ Vasooli replaces blind retries with an intelligent pipeline:
 | **Backend** | Python 3.12, FastAPI, Motor |
 | **Database** | MongoDB Atlas |
 | **AI / LLM** | Google Gemini (`gemini-3.5-flash-lite`, `gemini-3.6-flash`) |
-| **Frontend** | React 19, Vite, Tailwind CSS 4 |
+| **Frontend** | Typescript, Vite, Tailwind CSS 4 |
 | **Payment Gateway** | Razorpay |
 
 ## Architecture
