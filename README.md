@@ -4,7 +4,7 @@
 Built for the Razorpay Buildathon, Track 03. *Don't retry the payment. Diagnose the leak, choose the right recovery, and prove the money came back.*
 
 ## The Problem
-Standard payment recovery tools rely on blind retries or generic reminders that annoy customers and fail to address the actual reason a payment failed. By diagnosing the true root cause—whether it's a technical error, an expired card, or a temporary cash flow issue—a recovery system can choose the correct intervention, dramatically outperforming standard "retry-everything" baselines.
+Standard payment recovery tools rely on blind retries or generic reminders that annoy customers and fail to address the actual reason a payment failed. By diagnosing the true root cause-whether it's a technical error, an expired card, or a temporary cash flow issue—a recovery system can choose the correct intervention, dramatically outperforming standard "retry-everything" baselines.
 
 ## The Solution
 Vasooli replaces blind retries with an intelligent pipeline:
@@ -147,7 +147,7 @@ npm run dev
 
 **Making historical policy decisions provably re-derivable after rules change.** Business rules get tuned during development, but old decisions still needed to be explainable under the rules actually in effect when they were made — not silently reinterpreted under today's rules. We fingerprint every policy verdict with a hash of its exact rulebook parameters, so any verdict can be replayed and verified against its own historical rulebook.
 
-**Closing a race condition in Promise-to-Pay's safety check.** The obvious implementation — check payment status, then branch — doesn't guarantee the check actually happened before a follow-up fires. We closed this by making "customer hasn't paid" a short-lived, unforgeable token that the follow-up function requires as a mandatory argument: there is no code path that sends a follow-up without holding proof of that check.
+**Closing a race condition in Promise-to-Pay's safety check.** The obvious implementation - check payment status, then branch - doesn't guarantee the check actually happened before a follow-up fires. We closed this by making "customer hasn't paid" a short-lived, unforgeable token that the follow-up function requires as a mandatory argument: there is no code path that sends a follow-up without holding proof of that check.
 
 ## What's Next
 - **End-to-End Test Automation:** Implement browser automation (Playwright/Puppeteer) to programmatically complete Razorpay checkouts and trigger real webhooks.
