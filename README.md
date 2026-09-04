@@ -4,7 +4,7 @@
 Built for the Razorpay Buildathon, Track 03. *Don't retry the payment. Diagnose the leak, choose the right recovery, and prove the money came back.*
 
 ## The Problem
-Standard payment recovery tools rely on blind retries or generic reminders that annoy customers and fail to address the actual reason a payment failed. By diagnosing the true root cause-whether it's a technical error, an expired card, or a temporary cash flow issue-a recovery system can choose the correct intervention, dramatically outperforming standard "retry-everything" baselines.
+Standard payment recovery tools rely on blind retries or generic reminders that annoy customers and fail to address the actual reason a payment failed. By diagnosing the true root cause—whether it's a technical error, an expired card, or a temporary cash flow issue—a recovery system can choose the correct intervention, dramatically outperforming standard "retry-everything" baselines.
 
 ## The Solution
 Vasooli replaces blind retries with an intelligent pipeline:
