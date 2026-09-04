@@ -156,4 +156,4 @@ npm run dev
 
 ## Documentation
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Full technical reference: data models, intervention matrix, policy rulebook, fingerprinting, verification sources, and the four-layer recommend/authorize boundary.
-- **[PITCH_NOTES.md](PITCH_NOTES.md)** - Five-minute live demo script with exact event IDs, pre-filled chips, anticipated judge Q&A, and the numbers you must not misquote.
+
