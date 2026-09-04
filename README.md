@@ -139,6 +139,16 @@ npm run dev
 2. **Razorpay Link Cap:** Razorpay test-mode accounts have a strict 30-link lifetime cap per merchant account, limiting large-scale test executions.
 3. **Manual Verifications:** Contact-type interventions (like reminders) are structurally unverifiable by gateway webhooks and require a merchant's manual confirmation to count as recovered.
 
+## Build Challenges & Technical Obstacles
+
+**Enforcing the LLM-recommends/policy-authorizes split structurally, not by convention.** It's easy to say "the AI only recommends" — proving it required making unauthorized action literally unconstructable in code. The `Decision` model has no field for authorization or execution and rejects any attempt to add one; the executor's input type only accepts an already-authorized verdict, so there's no code branch to bypass because a blocked verdict can't even be constructed as its argument. We adversarially tested this with a prompt-injection attempt requesting a ₹91,000 refund — the type system silently discarded it.
+
+**Diagnosing Razorpay's real test-mode limits.** Test-mode payment links have a hidden 30-link *lifetime* cap per account, separate from a burst limit of roughly 5 creates per minute. We initially misdiagnosed the burst limit as the lifetime cap, since both produced an identical "5 succeed, then refused" symptom on different accounts for different reasons. Resolving it required isolating each limit with targeted API probes rather than trusting the first plausible explanation.
+
+**Making historical policy decisions provably re-derivable after rules change.** Business rules get tuned during development, but old decisions still needed to be explainable under the rules actually in effect when they were made — not silently reinterpreted under today's rules. We fingerprint every policy verdict with a hash of its exact rulebook parameters, so any verdict can be replayed and verified against its own historical rulebook.
+
+**Closing a race condition in Promise-to-Pay's safety check.** The obvious implementation — check payment status, then branch — doesn't guarantee the check actually happened before a follow-up fires. We closed this by making "customer hasn't paid" a short-lived, unforgeable token that the follow-up function requires as a mandatory argument: there is no code path that sends a follow-up without holding proof of that check.
+
 ## What's Next
 - **End-to-End Test Automation:** Implement browser automation (Playwright/Puppeteer) to programmatically complete Razorpay checkouts and trigger real webhooks.
 - **Automated PTP Scheduler:** Build a cron-driven scheduler to automatically follow up on promises-to-pay when their horizon dates pass.
