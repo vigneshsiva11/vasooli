@@ -27,12 +27,12 @@ so.
 ## 1. The pipeline
 
 Ten build stages. The numbering below is the project's own, taken from the module
-docstrings rather than reconstructed — which is why verification splits into a Part A and
+docstrings rather than reconstructed - which is why verification splits into a Part A and
 a Part B, and why two of the ten stages arrived after the read layer.
 
 | Stage | Module | Writes to | Reads from |
 |---|---|---|---|
-| 1. Ingestion | `app/ingestion/` | `events` | — |
+| 1. Ingestion | `app/ingestion/` | `events` | - |
 | 2. Diagnosis | `app/diagnosis/` | `diagnoses` | `events` |
 | 3. Decision | `app/decision/` | `decisions` | latest `diagnoses` |
 | 4. Policy | `app/policy/` | `policy_verdicts` | latest `decisions`, `customer_opt_outs`, prior `policy_verdicts`, `executions` |
@@ -40,25 +40,25 @@ a Part B, and why two of the ten stages arrived after the read layer.
 | 6A. Webhook verification | `app/webhooks/service.py` | `verifications` | `executions` |
 | 6B. Promise to pay | `app/ptp/service.py` | `promises` | `events`, verification state |
 | 7. Metrics & audit | `app/metrics/` | **nothing** | all of the above |
-| 8. Demo dataset | `scripts/s8_*.py` | — (drives the API) | — |
+| 8. Demo dataset | `scripts/s8_*.py` | - (drives the API) | - |
 | 9. Manual confirmation | `app/webhooks/manual.py` | `verifications` | `executions` |
 | 10. Free-text extraction | `app/ptp/extraction.py` | `promise_extractions` | free text + `events` |
 
 Nine collections in total: `events`, `diagnoses`, `decisions`, `policy_verdicts`,
 `executions`, `verifications`, `promises`, `promise_extractions`, `customer_opt_outs`.
 Note that **both verification paths write to one `verifications` collection** and are
-distinguished by their `source` field, not by living in separate places — so a query for
+distinguished by their `source` field, not by living in separate places - so a query for
 "how was this recovery attested" cannot miss one by looking in the wrong collection.
 
 ### Stage 7 cannot write, and that is proven mechanically
 
 `app/metrics/verify_readonly.py` is a standalone proof with two independent checks:
 
-1. **The HTTP surface** — walk the live app's OpenAPI schema and assert every path under
+1. **The HTTP surface** - walk the live app's OpenAPI schema and assert every path under
    `/metrics` or `/audit-trail` exposes `GET` and nothing else. Enumeration goes through
    `app.openapi()` rather than `app.routes`, "which is the only view that reflects what is
    actually served."
-2. **The source** — parse every module in the package to an AST and assert none of them
+2. **The source** - parse every module in the package to an AST and assert none of them
    *calls* a Motor write method (`create_index` included: an index is a write).
 
 The reason it parses rather than greps is stated in its docstring and is a good example of
@@ -79,7 +79,7 @@ correct under the rules that applied at the time?" would be unanswerable.
 ### One cross-module guard worth naming
 
 `app/policy/store.py` needs the name of the executions collection to compute the
-cooldown, but it cannot import `app/execution/store.py` — execution imports policy, so
+cooldown, but it cannot import `app/execution/store.py` - execution imports policy, so
 the reverse would be a cycle. So it declares the name itself, and
 `app/execution/store.py:57` asserts at import time that the two agree. The comment
 explains the bug this prevents: a silent divergence "would make the cooldown measure from
@@ -96,12 +96,12 @@ not.
 
 ### `app/models/events.py`
 
-- **`Surface`** — `Literal["payment", "checkout", "subscription", "receivable"]`. The
+- **`Surface`** - `Literal["payment", "checkout", "subscription", "receivable"]`. The
   surface is what makes the same root cause mean different things: `card_expired` on a
   `payment` and on a `subscription` get the same intervention here, but they need not.
-- **`EventStatus`** — the lifecycle: `at_risk`, `awaiting_promise`, `recovered`,
+- **`EventStatus`** - the lifecycle: `at_risk`, `awaiting_promise`, `recovered`,
   `recovery_failed`.
-- **`RevenueEvent`** — amount at risk, currency, surface, customer reference, the raw
+- **`RevenueEvent`** - amount at risk, currency, surface, customer reference, the raw
   gateway reason if any, occurred-at.
 - **`RevenueEventRecord`**, **`EventCreatedResponse`**.
 
@@ -117,17 +117,17 @@ Four closed root-cause enums, one per surface, 18 causes in total:
 | `receivable` | `payment_dispute`, `genuine_delay`, `non_responsive`, `unknown` |
 
 Note that `technical_error` exists only on `checkout` and `temporary_processing_error`
-only on `payment` — a failure the gateway reported and a checkout that broke are
+only on `payment` - a failure the gateway reported and a checkout that broke are
 different problems with different fixes, and the type system does not let one be filed
 as the other. `ALLOWED_ROOT_CAUSES` derives both the `Diagnosis` validator and the
-Gemini response schema from these four literals, so — in the source's words — "the LLM's
+Gemini response schema from these four literals, so - in the source's words - "the LLM's
 allowed vocabulary cannot drift from what storage will accept."
 
-- **`DiagnosisMethod`** — `Literal["rules", "llm", "fallback"]`. Stored on every
+- **`DiagnosisMethod`** - `Literal["rules", "llm", "fallback"]`. Stored on every
   diagnosis, so the provenance of any classification is a queryable field rather than an
   inference.
-- **`Diagnosis`** — root cause, confidence, `recoverable`, evidence strings, method.
-- **`LLMDiagnosisProposal`** — the *proposal* type. Separate from `Diagnosis` so that
+- **`Diagnosis`** - root cause, confidence, `recoverable`, evidence strings, method.
+- **`LLMDiagnosisProposal`** - the *proposal* type. Separate from `Diagnosis` so that
   what the model returns and what the system believes are different objects, and the
   transition between them is a place code runs.
 
@@ -137,18 +137,18 @@ Thresholds (`app/diagnosis/service.py:35,39`):
 |---|---|---|
 | `CONFIDENCE_FLOOR` | `0.5` | Below this the diagnosis is recorded as `unknown` and the decision layer emits `no_action_low_confidence`. |
 | `LLM_CONFIDENCE_CEILING` | `0.90` | A model's self-reported confidence is capped. It is not allowed to claim certainty. |
-| `FALLBACK_CONFIDENCE` | `0.20` | What a `fallback` diagnosis is worth — deliberately below the floor, so a fallback can never authorize anything by itself. |
+| `FALLBACK_CONFIDENCE` | `0.20` | What a `fallback` diagnosis is worth - deliberately below the floor, so a fallback can never authorize anything by itself. |
 
 In the 200-event demo dataset, 184 of 200 diagnoses resolved on the `rules` path and never
 reached a model.
 
 ### `app/models/decision.py`
 
-- **`InterventionName`** — a closed `Literal` of exactly ten: `immediate_retry`,
+- **`InterventionName`** - a closed `Literal` of exactly ten: `immediate_retry`,
   `delayed_retry`, `payment_method_update_link`, `recovery_payment_link`, `reminder`,
   `escalating_reminder_sequence`, `manual_escalation`, `no_action`,
   `no_action_low_confidence`, `no_action_negative_erv`.
-- **`Decision`** — recommended intervention, recovery probability, estimated cost,
+- **`Decision`** - recommended intervention, recovery probability, estimated cost,
   expected recovery value, reasoning, and the alternatives that were scored and lost.
 
 The ERV function is defined once, at `app/models/decision.py:86`:
@@ -159,8 +159,8 @@ def expected_recovery_value(revenue_at_risk, recovery_probability, estimated_cos
 ```
 
 `MONEY_PRECISION = 2`. A `@model_validator` named
-`_erv_must_follow_from_its_inputs` recomputes the value on every construction — including
-every read from the database — and rejects the record if it differs by more than
+`_erv_must_follow_from_its_inputs` recomputes the value on every construction - including
+every read from the database - and rejects the record if it differs by more than
 `ERV_TOLERANCE = 0.01`. A stored decision therefore cannot carry an ERV that does not
 follow from the three numbers printed next to it.
 
@@ -172,76 +172,76 @@ field names and prints *"OK: no authorization/execution/outcome field exists to 
 set."*
 ### `app/models/policy.py`
 
-- **`PolicyVerdictName`** — `Literal["authorized", "blocked", "requires_manual_review"]`.
-- **`PolicyReason`** — the closed set of reasons, ordered by precedence (see
+- **`PolicyVerdictName`** - `Literal["authorized", "blocked", "requires_manual_review"]`.
+- **`PolicyReason`** - the closed set of reasons, ordered by precedence (see
   [§4](#4-the-policy-rulebook)).
-- **`RulebookFingerprintSource`** — `Literal["evaluated", "reconstructed", "backfilled"]`.
+- **`RulebookFingerprintSource`** - `Literal["evaluated", "reconstructed", "backfilled"]`.
   How a verdict came to name the fingerprint it names.
-- **`PolicyVerdict`** / **`PolicyVerdictRecord`** — the verdict, the reason, the
+- **`PolicyVerdict`** / **`PolicyVerdictRecord`** - the verdict, the reason, the
   per-check results, and the rulebook fingerprint.
 - **`CustomerOptOut`**, **`OptOutRequest`**, **`OptOutResponse`**.
 
 ### `app/models/execution.py`
 
-- **`ActionType`** — what physically happened: `payment_link_generated`,
+- **`ActionType`** - what physically happened: `payment_link_generated`,
   `retry_simulated`, `contact_logged`.
-- **`ExecutionStatus`** — `Literal["completed", "failed"]`. Per the source comment, this
-  is "whether the *attempt* succeeded. Not whether the money came back" — that is
+- **`ExecutionStatus`** - `Literal["completed", "failed"]`. Per the source comment, this
+  is "whether the *attempt* succeeded. Not whether the money came back" - that is
   Stage 6's question, and keeping them in separate collections is why a successful send
   can never be mistaken for a recovery. There is no `pending`; a record is written after
   the attempt resolves.
-- **`AuthorizedVerdict`** — see [§9](#9-where-the-recommendauthorize-boundary-is-enforced).
+- **`AuthorizedVerdict`** - see [§9](#9-where-the-recommendauthorize-boundary-is-enforced).
   This is the load-bearing type in the whole system.
-- **`NotAuthorized(ValueError)`** and **`require_authorized(document)`** — the one
+- **`NotAuthorized(ValueError)`** and **`require_authorized(document)`** - the one
   supported way into execution.
 - **`ExecutionRecord`**, **`ExecutionRecordDocument`**.
 
 A note in the source (`app/models/execution.py:73`) records that `retry_simulated`
-actions "are an approximation of a retry rather than one" — Razorpay's API does not
+actions "are an approximation of a retry rather than one" - Razorpay's API does not
 expose re-charging an existing failed payment with the original instrument, so the retry
 is modelled, not performed. This is why `retry_simulated` actions are still counted as
 gateway-verifiable: the *verification* is real even where the retry is modelled.
 
 ### `app/models/verification.py`
 
-- **`VerificationSource`** — `Literal["webhook", "manual_confirmation"]` (line 125).
+- **`VerificationSource`** - `Literal["webhook", "manual_confirmation"]` (line 125).
   **Exactly two.** `WEBHOOK_SOURCE`, `MANUAL_SOURCE`, and `ALLOWED_SOURCES` are derived
   from it so no third can be introduced by a string literal somewhere.
-- **`VerificationOutcome`** — `Literal["recovered", "not_recovered", "expired",
-  "cancelled"]`. One declaration, so — per the source comment — "the receiver and the
+- **`VerificationOutcome`** - `Literal["recovered", "not_recovered", "expired",
+  "cancelled"]`. One declaration, so - per the source comment - "the receiver and the
   validator cannot disagree about what an event means." `scripts/s6_verify.py:741`
   confirms the closure negatively, by asserting that a query for an outcome outside this
   set is rejected rather than silently returning nothing.
-- **`RazorpayLinkEvent`** — the webhook payload shape, matched against Razorpay's
+- **`RazorpayLinkEvent`** - the webhook payload shape, matched against Razorpay's
   documented test-mode payloads rather than guessed.
-- **`WebhookVerification`** / **`ManualVerification`** and their `*Document` forms —
+- **`WebhookVerification`** / **`ManualVerification`** and their `*Document` forms -
   distinct types with distinct required fields, stored in the one `verifications`
   collection and told apart by `source`. A webhook record carries the signed payload it
   came from; a manual record carries who asserted it. Neither can be validated as the
   other.
-- **`ManualPaymentConfirmation`** — `amount_recovered` carries `strict=True`, the only
+- **`ManualPaymentConfirmation`** - `amount_recovered` carries `strict=True`, the only
   strict field in the module. A manual assertion of money is the one input with no
   external attestation behind it, so it does not get string coercion.
 - **`WebhookAck`**, **`ManualConfirmationAck`**.
 
 ### `app/models/promise.py`
 
-- **`PromiseState`** — `promised`, `honored`, `broken`, `reevaluating`.
-- **`PromiseToPay`** — amount, promised date, source, state.
+- **`PromiseState`** - `promised`, `honored`, `broken`, `reevaluating`.
+- **`PromiseToPay`** - amount, promised date, source, state.
 - **`PromiseRequest`**, **`FollowUpReport`**, **`PromiseCheck`**, **`PromiseToPayDocument`**.
 
 ### `app/models/promise_extraction.py`
 
-- **`RefusalReason`** — eight ways an extraction can produce no promise:
+- **`RefusalReason`** - eight ways an extraction can produce no promise:
   `llm_unavailable`, `unparseable_response`, `no_commitment_found`, `unparseable_date`,
   `date_before_message`, `date_beyond_horizon`, `confidence_below_floor`,
   `amount_exceeds_at_risk`. Only the first two are about the model failing; the other six
   are the deterministic layer refusing something the model returned successfully. A
   refusal is a first-class recorded outcome, not an absence of a record.
-- **`LLMPromiseProposal`** — again a *proposal*, distinct from `PromiseToPay`.
-- **`ExtractionOutcome`** — a `NamedTuple`, deliberately: the extraction result is a
+- **`LLMPromiseProposal`** - again a *proposal*, distinct from `PromiseToPay`.
+- **`ExtractionOutcome`** - a `NamedTuple`, deliberately: the extraction result is a
   return value, not a persisted entity.
-- **`PromiseExtraction`** / **`PromiseExtractionDocument`** — the message, the model's
+- **`PromiseExtraction`** / **`PromiseExtractionDocument`** - the message, the model's
   reading, the verbatim quote it anchored on, the accept/refuse decision, and the
   confidence.
 - **`PromiseFromTextRequest`**, **`PromiseFromTextResponse`**.
@@ -312,7 +312,7 @@ picks the highest.
 | `receivable` | `unknown` | `no_action` |
 
 `immediate_retry` at 0.65 on a transient processing error is the highest-confidence
-pairing in the matrix, and it costs nothing — which is exactly the case where a naive
+pairing in the matrix, and it costs nothing - which is exactly the case where a naive
 "retry everything" strategy happens to be right. The matrix's value is knowing that this
 is 1 pairing out of 24 rather than the default.
 
@@ -324,7 +324,7 @@ attempted cannot work. The baseline comparison honours this: where a baseline's
 intervention family has no defined probability for a pair, the event **scores zero**
 rather than being assigned a substitute number. That is why
 `GET /metrics/baseline-comparison` publishes `events_with_defined_probability`
-alongside every total — for `retry_everything` only 109 of 289 events have any defined
+alongside every total - for `retry_everything` only 109 of 289 events have any defined
 probability at all, and 180 score zero.
 
 Both baselines are also given their **best case on purpose**: where a family defines
@@ -347,12 +347,12 @@ the current catalogue.
 `app/policy/rules.py` and `app/policy/rulebook.py`. This module imports nothing from
 `app/diagnosis/` and makes no model call. It is the deterministic half of the system.
 
-### Current parameters — fingerprint `rb1_aba19a5e5ee8124e`
+### Current parameters - fingerprint `rb1_aba19a5e5ee8124e`
 
 | Parameter | Value | Meaning |
 |---|---|---|
 | `minimum_erv` | **₹25.00** | Below this, acting is not worth the operational noise. |
-| `zero_cost_exempt_from_erv_floor` | `True` | A free action is exempt from the floor — there is nothing to waste. |
+| `zero_cost_exempt_from_erv_floor` | `True` | A free action is exempt from the floor - there is nothing to waste. |
 | `auto_authorize_below` | **₹5,000.00** | Exclusive. Below this a machine may act alone. |
 | `never_auto_at_or_above` | **₹25,000.00** | Inclusive. At or above this, no automatic authorization is possible at any ERV. |
 | `tier_currency` | `INR` | The tiers are declared in one currency and compared against raw amounts. See README limitation 3. |
@@ -384,7 +384,7 @@ threshold falls to the cautious side. ₹5,000.00 exactly requires approval; ₹
 exactly is never automatic.
 
 `erv_floor_applies()` returns `False` when `zero_cost_exempt_from_erv_floor` is set and
-`estimated_cost <= 0` — so a free retry on a ₹40 invoice is not blocked by the ₹25
+`estimated_cost <= 0` - so a free retry on a ₹40 invoice is not blocked by the ₹25
 floor, but a ₹50 manual escalation on the same invoice is.
 
 ### The six checks, in order
@@ -400,7 +400,7 @@ floor, but a ₹50 manual escalation on the same invoice is.
 | 5 | `erv_minimum` | ERV is below ₹25 and the action is not zero-cost. |
 | 6 | `amount_tier` | The amount is at or above ₹5,000. |
 
-Every check runs and every result is recorded, even after one has already failed —
+Every check runs and every result is recorded, even after one has already failed -
 which is why the `pol_S4_MULTI` audit trail shows three FAILs and three PASSes rather
 than stopping at the first. The `reason` reported is chosen by a fixed precedence, not
 by evaluation order:
@@ -433,13 +433,13 @@ means *a machine may not decide this alone*.
 
 | Prior state | Counts toward cooldown? | Anchored at |
 |---|---|---|
-| Authorized but not yet executed | **Yes** — as a reservation | `verdict.evaluated_at` |
+| Authorized but not yet executed | **Yes** - as a reservation | `verdict.evaluated_at` |
 | Executed successfully | **Yes** | `execution.executed_at` |
-| Executed and **failed** | **No** | — |
+| Executed and **failed** | **No** | - |
 
 An authorization that has not executed yet still holds the slot, so two authorizations
 cannot race into two contacts. A *failed* execution counts against neither the cooldown
-nor the cap, because the customer was never actually contacted — charging someone a
+nor the cap, because the customer was never actually contacted - charging someone a
 cooldown for a message that did not send would be punishing the customer for our
 infrastructure.
 
@@ -451,7 +451,7 @@ because which field is used selects the behaviour above.
 
 `_validate_parameters()` is called at the bottom of `app/policy/rules.py` (line 331).
 It checks that the thresholds reach every declared tier, that no two superseded
-rulebooks share a fingerprint, and — the important one — **that the rulebook currently
+rulebooks share a fingerprint, and - the important one - **that the rulebook currently
 in force does not appear in the superseded archive.** Its error message names the two
 ways that can happen: "either an amendment was archived but never applied to the
 parameters above, or one was reverted without removing its archive entry."
@@ -466,7 +466,7 @@ force then. Without recording *which* parameters, the verdict is un-auditable: y
 cannot tell a correct block under old rules from a bug.
 
 `Rulebook` (`app/policy/rulebook.py`) is a **frozen dataclass** whose fields are every
-parameter the engine can read — the ten in the table above — plus four tables owned by
+parameter the engine can read - the ten in the table above - plus four tables owned by
 `app/models` rather than by the policy module: `NO_ACTION_INTERVENTIONS`,
 `POLICY_CHECKS`, `REASON_PRECEDENCE`, and `REASON_VERDICT`. Those are included because
 changing the order of `REASON_PRECEDENCE` changes what a verdict *says* even though no
@@ -474,7 +474,7 @@ threshold moved, and a fingerprint that missed that would be lying.
 
 The fingerprint is a SHA-256 over a canonical serialization
 (`app/policy/rulebook.py:288`), truncated to `FINGERPRINT_DIGEST_CHARS` and prefixed
-with `FINGERPRINT_SCHEME` — both declared in `app/models/policy.py`, so the format is
+with `FINGERPRINT_SCHEME` - both declared in `app/models/policy.py`, so the format is
 versioned and a future scheme change is distinguishable rather than silently
 incompatible. Hence the `rb1_` prefix on `rb1_aba19a5e5ee8124e`.
 
@@ -496,13 +496,13 @@ this registry and renders the parameters that were actually applied.
 
 ### `RulebookFingerprintSource`
 
-`Literal["evaluated", "reconstructed", "backfilled"]` — how the verdict came to name
+`Literal["evaluated", "reconstructed", "backfilled"]` - how the verdict came to name
 its fingerprint:
 
-- **`evaluated`** — the engine computed it at the moment of the verdict. Trustworthy.
-- **`reconstructed`** — derived after the fact by matching the verdict's recorded
+- **`evaluated`** - the engine computed it at the moment of the verdict. Trustworthy.
+- **`reconstructed`** - derived after the fact by matching the verdict's recorded
   parameters against the registry.
-- **`backfilled`** — assigned to records that predate the mechanism.
+- **`backfilled`** - assigned to records that predate the mechanism.
 
 The three are kept distinct so that "this verdict was made under rulebook X" and "we
 believe this verdict was probably made under rulebook X" are never the same claim. The
@@ -515,14 +515,14 @@ believe this verdict was probably made under rulebook X" are never the same clai
 **There are exactly two.** `VerificationSource =
 Literal["webhook", "manual_confirmation"]` at `app/models/verification.py:125`.
 
-### `webhook` — third-party attested
+### `webhook` - third-party attested
 
 Razorpay `POST`s to `/webhooks/razorpay`. The signature is verified against
 `RAZORPAY_WEBHOOK_SECRET` using the scheme documented at
 `https://razorpay.com/docs/webhooks/validate-test/` (cited in
 `app/webhooks/signature.py:26`). An unverified signature is not processed.
 
-Applies when the intervention produced a Razorpay artifact — that is, the four
+Applies when the intervention produced a Razorpay artifact - that is, the four
 intervention types with `verifiable: true` in `GET /metrics/by-intervention`:
 `payment_method_update_link`, `recovery_payment_link`, `delayed_retry`,
 `immediate_retry`.
@@ -530,13 +530,13 @@ intervention types with `verifiable: true` in `GET /metrics/by-intervention`:
 Handled events set state as follows: a paid link marks the event `recovered`;
 `payment_link.expired` and `payment_link.cancelled` are the **only** two paths to
 `recovery_failed` (`app/webhooks/service.py:67`). Nothing else can mark an event failed
-— absence of a webhook is not evidence of failure.
+- absence of a webhook is not evidence of failure.
 
 This is the source behind **₹29,605.14 across 17 recoveries**, and behind the **1.35%**
 headline rate that `/metrics/summary`'s own methodology string calls "the conservative
 figure to quote."
 
-### `manual_confirmation` — merchant asserted
+### `manual_confirmation` - merchant asserted
 
 `POST /executions/{execution_id}/confirm-payment`. The merchant states that money
 arrived, with an amount.
@@ -548,7 +548,7 @@ results in the customer paying through some channel Razorpay never saw. Before S
 these recoveries were structurally invisible; now they can be attested, but never
 laundered into gateway-verified figures.
 
-This is the source behind **₹3,516.95 across 3 recoveries** — one each on the three
+This is the source behind **₹3,516.95 across 3 recoveries** - one each on the three
 contact interventions.
 
 `ManualPaymentConfirmation.amount_recovered` is the only `strict=True` field in the
@@ -556,7 +556,7 @@ module, because it is the one money figure with no external attestation behind i
 
 ### They are never merged
 
-Every money metric in the system exposes both variants —
+Every money metric in the system exposes both variants -
 `gateway_verified_recovered` / `manually_asserted_recovered`,
 `recovery_rate` / `recovery_rate_gateway_verified`,
 `recoveries_gateway_verified` / `recoveries_manually_asserted`. The UI renders the split
@@ -595,7 +595,7 @@ MAX_CONFIRMATION_AGE_SECONDS: Final = 60.0
 _MINTED_BY_THE_CHECK: Final = object()
 ```
 
-`UnpaidConfirmation` is a **frozen dataclass, deliberately not Pydantic** — a Pydantic
+`UnpaidConfirmation` is a **frozen dataclass, deliberately not Pydantic** - a Pydantic
 model would expose `model_validate`, which is a second constructor, and the whole
 mechanism depends on there being one. It carries `still_unpaid: Literal[True]`, so a
 "confirmation that they have paid" is not a representable value.
@@ -639,7 +639,7 @@ decide whether one exists.** Two recorded cases make the split visible:
 The first is the more interesting one. The model was almost certain a promise existed,
 and a date-horizon check the model has no input into refused it anyway.
 
-Note also that `demo_199_rcv` was stopped by the *first* line of defence — the model
+Note also that `demo_199_rcv` was stopped by the *first* line of defence - the model
 returned no commitment, so `no_commitment_found` fired. Had it instead complied with the
 injection and returned `promised_amount: 9999999`, `amount_exceeds_at_risk` would have
 refused it at the next check, because a promise cannot exceed the amount the event says
@@ -651,7 +651,7 @@ is at risk. The defence does not depend on the model behaving.
 
 27 routes. Eight routers, assembled in `app/main.py`.
 
-**Health** — `GET /`. Returns status, service, version, environment, and the
+**Health** - `GET /`. Returns status, service, version, environment, and the
 reachability of MongoDB and Gemini, probed concurrently via `asyncio.gather`. Neither
 dependency being down makes this endpoint fail: a degraded service still reports, it
 just reports honestly. There is **no `/health`** route.
@@ -672,21 +672,21 @@ just reports honestly. There is **no `/health`** route.
 | `POST /promises/from-text` | 8 |
 | `POST /opt-out/{customer_ref}` | 4 (input) |
 
-**Collections (read)** — `GET /events`, `/diagnoses`, `/decisions`,
+**Collections (read)** - `GET /events`, `/diagnoses`, `/decisions`,
 `/policy-verdicts`, `/executions`, `/verifications`, `/promises`,
 `/promise-extractions`, `/opt-outs`.
 
-**Metrics (read)** — `GET /metrics/summary`, `/metrics/by-root-cause`,
+**Metrics (read)** - `GET /metrics/summary`, `/metrics/by-root-cause`,
 `/metrics/by-intervention`, `/metrics/promise-to-pay`,
 `/metrics/baseline-comparison`.
 
-**Audit (read)** — `GET /audit-trail/{event_id}`.
+**Audit (read)** - `GET /audit-trail/{event_id}`.
 
 `app/main.py` declares the app as `FastAPI(title=settings.app_name,
-description="AI revenue recovery agent — the LLM recommends, policy authorizes.",
+description="AI revenue recovery agent - the LLM recommends, policy authorizes.",
 version="0.1.0", lifespan=lifespan)`. The lifespan handler calls eight
 `ensure_*_indexes()` functions; a failed database connection is logged, not fatal, for
-the same reason the health check is not all-or-nothing. CORS is `allow_origins=["*"]` —
+the same reason the health check is not all-or-nothing. CORS is `allow_origins=["*"]` -
 appropriate for a local demo and not for production.
 
 ### Known gap
@@ -707,12 +707,12 @@ Four mechanisms, in the order a request meets them.
 `app/diagnosis/gemini.py:290`. Every call sets:
 
 - `response_mime_type="application/json"` and `response_schema=_response_schema(surface)`
-  — the model returns a constrained object, not prose.
-- `temperature=0.0` — classification, not generation.
+  - the model returns a constrained object, not prose.
+- `temperature=0.0` - classification, not generation.
 - `automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)`.
 
 That last line is the one worth reading the comment for: *"No tools are declared, so
-there is nothing for the model to call — but leaving automatic function calling enabled
+there is nothing for the model to call - but leaving automatic function calling enabled
 means the SDK keeps a tool-invocation path open on this request. Disabling it makes
 'this client cannot execute anything' a property of the request, not an accident of us
 having passed no tools."*
@@ -728,24 +728,24 @@ useful classification. Evidence strings are capped at 240 characters and
 `extra="forbid"` means one cannot be added by a caller.
 `scripts/s3_adversarial.py` proves this by attack rather than by assertion:
 
-- **Section 5** — constructs a `Decision` directly, bypassing the engine, with each of
+- **Section 5** - constructs a `Decision` directly, bypassing the engine, with each of
   `authorized=True`, `approved=True`, `executed=True`, `status="executed"`,
   `razorpay_payment_link_id="plink_TESTFAKE123"`,
   `recipient_email="victim@example.com"`, `execute_now=True`, and
   `amount_to_charge=6500.0`. All 8 rejected.
-- **Section 6** — out-of-catalogue interventions: `full_refund_and_apology`,
+- **Section 6** - out-of-catalogue interventions: `full_refund_and_apology`,
   `charge_customer_directly`, `immediate_retry_twice`, `IMMEDIATE_RETRY`, and `""`. All
   rejected, because `InterventionName` is a closed `Literal`.
-- **Section 7** — out-of-range probabilities and costs. Rejected.
-- **Section 8** (`field_surface_check`, line 212) — asserts `Decision.model_fields`
+- **Section 7** - out-of-range probabilities and costs. Rejected.
+- **Section 8** (`field_surface_check`, line 212) - asserts `Decision.model_fields`
   contains none of 17 forbidden names, and prints *"OK: no authorization/execution/outcome
   field exists to be set."*
-- **Section 9** (`import_boundary_check`, line 232) — the structural one. Asserts that no
+- **Section 9** (`import_boundary_check`, line 232) - the structural one. Asserts that no
   module in `app/decision/` imports `app.policy`, `app.execution`, `razorpay`, `requests`,
   or `httpx`, and that `engine.py` contains no reference to `get_database`,
   `AsyncIOMotor`, `generate_content`, or `gemini`. It prints *"OK: engine.py holds no
   database handle, no LLM call, no HTTP client."* The recommendation engine is not merely
-  *not used* for acting — it has no import path to anything that could act.
+  *not used* for acting - it has no import path to anything that could act.
 
 ### 3. Execution's only input type is an already-granted permission
 
@@ -769,28 +769,28 @@ in.
 ### 4. Message content is never model-generated
 
 Contact-type interventions render deterministic templates. Gemini is called in exactly
-two places in this system — diagnosis classification and promise extraction — and
+two places in this system - diagnosis classification and promise extraction - and
 neither produces text that is sent to a customer.
 
 ### The composite proof
 
 Event `pol_S4_MULTI` shows all of it in one screen. Diagnosis v2: `non_responsive`,
 confidence 0.9, method `rules`, evidence *"gateway reported canonical code
-'no_response'"*. Decision v4: `manual_escalation`, with the arithmetic printed —
-**₹60,000 × 0.55 − ₹50 = ₹32,950** — the losing alternative scored and shown
+'no_response'"*. Decision v4: `manual_escalation`, with the arithmetic printed -
+**₹60,000 × 0.55 − ₹50 = ₹32,950** - the losing alternative scored and shown
 (`escalating_reminder_sequence`, ERV ₹20,980.00), and the disclaimer
 *"Probabilities are calibrated estimates, not measured rates."* Policy verdict v6:
 **BLOCKED · Customer Opted Out**, fingerprint `rb1_aba19a5e5ee8124e · evaluated`, with
-all six checks shown — `decision_is_actionable` PASS, `customer_opt_out` FAIL,
+all six checks shown - `decision_is_actionable` PASS, `customer_opt_out` FAIL,
 `contact_cap` FAIL (3 of 3, across all decision versions), `contact_cooldown` PASS
 (26.4h ago, outside the 24h window), `erv_minimum` PASS (₹32,950.00 clears ₹25.00 at a
 cost of ₹50.00), `amount_tier` FAIL (₹60,000.00 at or above the ₹25,000.00 never-auto
 ceiling).
 
-Execution: **"Not reached — blocked by policy."**
-Verification: **"Not reached — no execution to verify."**
+Execution: **"Not reached - blocked by policy."**
+Verification: **"Not reached - no execution to verify."**
 
-A high-value, high-ERV, well-reasoned recommendation, refused — and the refusal is
+A high-value, high-ERV, well-reasoned recommendation, refused - and the refusal is
 legible check by check.
 
 ---
